@@ -580,3 +580,6 @@ input.invalid, select.invalid { border-color: var(--red); box-shadow: 0 0 0 3px 
 @media print { .lightbox, .nav-inst { display: none !important; } .anx-grid { grid-template-columns: repeat(4, 1fr); } }
 .anx.pend .anx-th { cursor: default; }
 .anx.pend { border-style: dashed; border-color: #F2C39F; }
+.span3 { grid-column: span 3; }
+@media (max-width: 880px) { .g4 .span3 { grid-column: span 2; } }
+@media (max-width: 640px) { .g4 .span3 { grid-column: auto; } }

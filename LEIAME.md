@@ -44,6 +44,8 @@ Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rod
 - **Eventos:** busca e filtros por situação, tipo, gerente e "só os meus".
 - **Cadastro do evento:**
   - situação por cor e número sequencial automático;
+  - tipo de evento da lista ou escrito à mão ("Outro (escrever)");
+  - endereço de entrega de produtos, com preenchimento automático pelo CEP (ViaCEP, gratuito) e botão "Abrir no mapa";
   - contratos, serviços, gastos diversos, envolvidos, hospedagem, alimentação, passagens e observações;
   - total somado na hora.
 - **Tecla Enter:** avança de campo em campo, abre uma nova linha no fim de uma linha preenchida e, numa linha vazia, pula para a próxima seção.
