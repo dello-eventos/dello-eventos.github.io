@@ -241,3 +241,21 @@ create policy "historico_select" on public.historico
 -- Visitantes não autenticados não acessam nada
 revoke all on public.perfis, public.eventos, public.historico from anon;
 
+
+-- ---------------------------------------------------------------------
+-- Endurecimento (recomendações do Security Advisor do Supabase)
+-- ---------------------------------------------------------------------
+alter function public.soma_valores(jsonb) set search_path = '';
+alter function public.calcular_total(jsonb) set search_path = '';
+
+-- Funções de gatilho: só o próprio banco as executa
+revoke execute on function public.novo_usuario() from public, anon, authenticated;
+revoke execute on function public.proteger_ultimo_admin() from public, anon, authenticated;
+revoke execute on function public.eventos_antes_gravar() from public, anon, authenticated;
+revoke execute on function public.eventos_registrar_historico() from public, anon, authenticated;
+
+-- Funções usadas nas regras de acesso: só para quem está logado
+revoke execute on function public.is_ativo() from public, anon;
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_ativo() to authenticated;
+grant execute on function public.is_admin() to authenticated;
