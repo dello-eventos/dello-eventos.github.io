@@ -33,7 +33,7 @@ As regras ficam **no banco de dados** (Row Level Security), não só na tela.
 
 O administrador define uma **senha provisória** em **Usuários → Senha provisória**. A pessoa troca depois no ícone de chave, ao lado do nome.
 
-Esse recurso precisa ser ativado **uma vez**:
+Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rode de novo:
 1. Abra Supabase → projeto `dello-eventos` → **SQL Editor** → **New query**.
 2. Cole o conteúdo de [`supabase/opcional-senha-provisoria.sql`](supabase/opcional-senha-provisoria.sql).
 3. Clique em **Run**.
@@ -71,7 +71,7 @@ assets/styles.css                    visual (cores e fonte da Dello)
 assets/config.js                     conexão com o Supabase
 assets/logo-dello.png                logo
 supabase/schema.sql                  tabelas, permissões e histórico (já aplicado)
-supabase/opcional-senha-provisoria.sql  recurso opcional de senha provisória
+supabase/opcional-senha-provisoria.sql  senha provisória definida pelo admin (já aplicado)
 .github/workflows/manter-banco-ativo.yml  consulta a cada 3 dias para o banco não pausar
 ```
 
