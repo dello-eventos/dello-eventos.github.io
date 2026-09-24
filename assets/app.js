@@ -104,9 +104,14 @@ function parseMoney(s) {
   if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
   else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
   const n = parseFloat(s);
-  return isNaN(n) ? 0 : Math.round(n * 100) / 100;
+  if (!isFinite(n) || n <= 0) return 0;
+  return Math.round(Math.min(n, 999999999) * 100) / 100;
 }
-const fdate = (d) => d ? String(d).slice(0, 10).split('-').reverse().join('/') : '';
+const fdate = (d) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d ?? ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+};
+const fdia = (t) => t ? new Date(t).toLocaleDateString('pt-BR') : '';
 const fdt = (t) => t ? new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 const pad = (n) => n == null ? '—' : String(n).padStart(4, '0');
 const hojeISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
@@ -134,21 +139,39 @@ const store = (() => {
 })();
 
 function subtotais(d = {}) {
-  const s = (a) => soma(a || [], (x) => x.valor);
+  const pos = (v) => Math.max(0, Number(v) || 0);
+  const s = (a) => soma(Array.isArray(a) ? a : [], (x) => pos(x?.valor));
   return {
-    contratos: (Number(d.contratoEvento?.valor) || 0) + (Number(d.montadora?.valor) || 0),
+    contratos: pos(d.contratoEvento?.valor) + pos(d.montadora?.valor),
     servicos: s(d.servicos), gastos: s(d.gastos), hospedagem: s(d.hospedagem),
     alimentacao: s(d.alimentacao), passagens: s(d.passagens),
   };
 }
 const totalDe = (d) => Math.round(soma(Object.values(subtotais(d))) * 100) / 100;
 
+// Garante o formato esperado dos dados vindos do banco (proteção contra registros malformados)
+function sanear(ev) {
+  if (!ev) return ev;
+  const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x)) ? x : {};
+  const arr = (x) => Array.isArray(x) ? x.filter((i) => i && typeof i === 'object' && !Array.isArray(i)) : [];
+  const d = obj(ev.dados);
+  ev.dados = {
+    ...d, contratoEvento: obj(d.contratoEvento), montadora: obj(d.montadora),
+    servicos: arr(d.servicos), gastos: arr(d.gastos), hospedagem: arr(d.hospedagem),
+    alimentacao: arr(d.alimentacao), passagens: arr(d.passagens),
+    envolvidos: Array.isArray(d.envolvidos) ? d.envolvidos.filter((x) => typeof x === 'string') : [],
+    observacoes: typeof d.observacoes === 'string' ? d.observacoes : '',
+  };
+  return ev;
+}
+
 function msgErro(e) {
   const m = String(e?.message || e || '');
   if (/Invalid login credentials/i.test(m)) return 'E-mail ou senha incorretos.';
   if (/Email not confirmed/i.test(m)) return 'Confirme seu e-mail pelo link que enviamos antes de entrar.';
   if (/already registered|already been registered/i.test(m)) return 'Este e-mail já está cadastrado. Use "Entrar" ou "Esqueci minha senha".';
-  if (/Password should be at least/i.test(m)) return 'A senha precisa ter pelo menos 6 caracteres.';
+  if (/Password should be at least|at least 8/i.test(m)) return 'A senha precisa ter pelo menos 8 caracteres.';
+  if (/check constraint|value too long|too large/i.test(m)) return 'Algum campo passou do tamanho permitido. Encurte o texto e tente de novo.';
   if (/rate limit|too many/i.test(m)) return 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.';
   if (/row-level security|permission denied|PGRST116|0 rows/i.test(m)) return 'Você não tem permissão para esta ação.';
   if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Sem conexão com o servidor. Verifique a internet.';
@@ -230,8 +253,15 @@ function SupaAPI() {
     async resetPassword(email) { chk(await sb.auth.resetPasswordForEmail(email, { redirectTo: url() })); },
     async updatePassword(password) { chk(await sb.auth.updateUser({ password })); },
     async signOut() { await sb.auth.signOut(); },
-    async listEventos() { return chk(await sb.from('eventos').select('*').order('numero', { ascending: false })); },
-    async getEvento(id) { return chk(await sb.from('eventos').select('*').eq('id', id).maybeSingle()); },
+    async listEventos() {
+      const todos = [];
+      for (let de = 0; ; de += 1000) {
+        const pag = chk(await sb.from('eventos').select('*').order('numero', { ascending: false }).range(de, de + 999));
+        todos.push(...pag.map(sanear));
+        if (pag.length < 1000) return todos;
+      }
+    },
+    async getEvento(id) { return sanear(chk(await sb.from('eventos').select('*').eq('id', id).maybeSingle())); },
     async saveEvento(ev) {
       if (ev.id) {
         const r = chk(await sb.from('eventos').update(campos(ev)).eq('id', ev.id).select());
@@ -393,6 +423,10 @@ const podeEditar = (ev) => !!S.me && (isAdmin() || ev.criado_por === S.me.id);
 const nomeDe = (id) => S.perfis.find((p) => p.id === id)?.nome || '—';
 
 async function boot() {
+  if (window.top !== window.self) {
+    root.innerHTML = `<div class="pending"><img src="assets/logo-dello.png" alt="Dello"><h2>Abra o sistema diretamente</h2><p><a href="${esc(location.href)}" target="_top" rel="noopener">Clique aqui para abrir a Gestão de Eventos</a></p></div>`;
+    return;
+  }
   const hash = location.hash;
   if (/type=recovery/.test(hash)) S.recovery = true;
   let erroLink = '';
@@ -403,7 +437,8 @@ async function boot() {
 
   if (DEMO) api = DemoAPI();
   else if (!window.supabase?.createClient) {
-    root.innerHTML = `<div class="pending"><img src="assets/logo-dello.png" alt="Dello"><div class="ico">${ic('alert')}</div><h2>Não foi possível conectar</h2><p>Verifique sua conexão com a internet e recarregue a página.</p><button class="btn btn-primary" onclick="location.reload()">${ic('refresh')}Recarregar</button></div>`;
+    root.innerHTML = `<div class="pending"><img src="assets/logo-dello.png" alt="Dello"><div class="ico">${ic('alert')}</div><h2>Não foi possível conectar</h2><p>Verifique sua conexão com a internet e recarregue a página.</p><button class="btn btn-primary" id="btnReload">${ic('refresh')}Recarregar</button></div>`;
+    $('#btnReload').onclick = () => location.reload();
     return;
   } else api = SupaAPI();
 
@@ -440,7 +475,7 @@ function pedirNovaSenha() {
     body: `<div class="field"><label>Nova senha</label><input type="password" name="s1" autocomplete="new-password" required></div>
            <div class="field"><label>Confirme a nova senha</label><input type="password" name="s2" autocomplete="new-password" required></div>`,
     onSubmit: async ({ s1, s2 }) => {
-      if ((s1 || '').length < 6) throw new Error('A senha precisa ter pelo menos 6 caracteres.');
+      if ((s1 || '').length < 8) throw new Error('A senha precisa ter pelo menos 8 caracteres.');
       if (s1 !== s2) throw new Error('As senhas não conferem.');
       await api.updatePassword(s1);
       toast('Senha atualizada');
@@ -477,9 +512,9 @@ function renderAuth(modo = 'entrar', aviso = null) {
       ${modo === 'recuperar' ? `<button class="btn btn-primary btn-block" data-m="entrar">${ic('back')}Voltar para o login</button>` : `<form id="fAuth" novalidate>
         ${aviso?.err ? `<div class="msg err">${esc(aviso.err)}</div>` : ''}
         ${aviso?.ok ? `<div class="msg ok">${esc(aviso.ok)}</div>` : ''}
-        ${modo === 'criar' ? `<div class="field"><label for="aNome">Nome completo</label><input id="aNome" name="nome" autocomplete="name" required></div>` : ''}
-        <div class="field"><label for="aEmail">E-mail</label><input id="aEmail" name="email" type="email" autocomplete="email" required></div>
-        ${modo !== 'recuperar' ? `<div class="field"><label for="aSenha">Senha</label><input id="aSenha" name="senha" type="password" autocomplete="${modo === 'criar' ? 'new-password' : 'current-password'}" required>${modo === 'criar' ? '<div class="hint">Mínimo de 6 caracteres.</div>' : ''}</div>` : ''}
+        ${modo === 'criar' ? `<div class="field"><label for="aNome">Nome completo</label><input id="aNome" name="nome" autocomplete="name" maxlength="120" value="${esc(aviso?.nome || '')}" required></div>` : ''}
+        <div class="field"><label for="aEmail">E-mail</label><input id="aEmail" name="email" type="email" autocomplete="email" maxlength="200" value="${esc(aviso?.email || '')}" required></div>
+        ${modo !== 'recuperar' ? `<div class="field"><label for="aSenha">Senha</label><input id="aSenha" name="senha" type="password" autocomplete="${modo === 'criar' ? 'new-password' : 'current-password'}" required>${modo === 'criar' ? '<div class="hint">Mínimo de 8 caracteres.</div>' : ''}</div>` : ''}
         ${modo === 'criar' ? `<div class="field"><label for="aSenha2">Confirme a senha</label><input id="aSenha2" name="senha2" type="password" autocomplete="new-password" required></div>` : ''}
         ${modo === 'entrar' ? `<div class="row-end"><a class="linkish" data-m="recuperar">Esqueci minha senha</a></div>` : ''}
         <button class="btn btn-primary btn-block" type="submit">${cfg.ok}</button>
@@ -490,12 +525,12 @@ function renderAuth(modo = 'entrar', aviso = null) {
   $$('[data-m]').forEach((a) => a.addEventListener('click', () => renderAuth(a.dataset.m)));
   const f = $('#fAuth');
   if (!f) return;
-  ($('input', f)).focus();
+  (aviso?.email ? $('#aSenha', f) || $('input', f) : $('input', f)).focus();
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const d = Object.fromEntries(new FormData(f));
     const email = (d.email || '').trim().toLowerCase();
-    const falha = (m) => renderAuth(modo, { err: m });
+    const falha = (m) => renderAuth(modo, { err: m, email: d.email, nome: d.nome });
     if (!/^\S+@\S+\.\S+$/.test(email)) return falha('Informe um e-mail válido.');
     const btn = $('[type=submit]', f);
     btn.disabled = true; btn.textContent = 'Aguarde…';
@@ -507,7 +542,7 @@ function renderAuth(modo = 'entrar', aviso = null) {
         await entrar();
       } else if (modo === 'criar') {
         if (!d.nome?.trim()) return falha('Informe seu nome.');
-        if ((d.senha || '').length < 6) return falha('A senha precisa ter pelo menos 6 caracteres.');
+        if ((d.senha || '').length < 8) return falha('A senha precisa ter pelo menos 8 caracteres.');
         if (d.senha !== d.senha2) return falha('As senhas não conferem.');
         const r = await api.signUp(d.nome.trim(), email, d.senha);
         if (r?.session) await entrar();
@@ -587,7 +622,7 @@ function renderShell() {
     body: `<div class="field"><label>Nova senha</label><input type="password" name="s1" autocomplete="new-password"></div>
            <div class="field"><label>Confirme a nova senha</label><input type="password" name="s2" autocomplete="new-password"></div>`,
     onSubmit: async ({ s1, s2 }) => {
-      if ((s1 || '').length < 6) throw new Error('A senha precisa ter pelo menos 6 caracteres.');
+      if ((s1 || '').length < 8) throw new Error('A senha precisa ter pelo menos 8 caracteres.');
       if (s1 !== s2) throw new Error('As senhas não conferem.');
       await api.updatePassword(s1);
       toast('Senha alterada com sucesso');
@@ -635,8 +670,17 @@ const ROTAS = [
 ];
 let ultimoHash = location.hash, ignorar = false;
 
+let ultimaChecagem = Date.now();
 async function route() {
   if (!S.me || !$('#view')) return;
+  if (!DEMO && Date.now() - ultimaChecagem > 5 * 60 * 1000) {
+    ultimaChecagem = Date.now();
+    try {
+      const eu = await api.me();
+      if (!eu || !eu.ativo) { S.me = eu; S.dirty = false; if (eu) renderPendente(); else renderAuth('entrar'); return; }
+      if (eu.papel !== S.me.papel) { S.me = eu; renderShell(); }
+    } catch { /* sem conexão: segue com o que tem */ }
+  }
   const h = location.hash || '#/painel';
   const r = ROTAS.find(([re]) => re.test(h));
   if (!r) { location.hash = '#/painel'; return; }
@@ -646,7 +690,8 @@ async function route() {
   try { await r[2](h.match(r[0])); }
   catch (e) {
     console.error(e);
-    view().innerHTML = `<div class="card">${vazio('alert', 'Não foi possível carregar', esc(msgErro(e)), '<button class="btn" onclick="location.reload()">Tentar novamente</button>')}</div>`;
+    view().innerHTML = `<div class="card">${vazio('alert', 'Não foi possível carregar', esc(msgErro(e)), '<button class="btn" id="btnReload">Tentar novamente</button>')}</div>`;
+    $('#btnReload').onclick = () => location.reload();
   }
 }
 
@@ -880,14 +925,14 @@ async function viewDetalhe(id) {
         <div class="hbars">${CATS.map(([k, l]) => `<div class="hbar"><div class="top"><b>${l}</b><span>${brl(st[k])}</span></div><div class="track"><div class="fill" style="width:${(st[k] / maxC) * 100}%"></div></div></div>`).join('')}</div></div>
       <div class="card"><div class="card-h"><h3>Contratos</h3><span class="sp"></span><b class="num">${brl(st.contratos)}</b></div>
         <div class="sub-h" style="margin-top:0">Contrato sobre o evento</div>
-        <div class="grid g3"><div><div class="lbl">Aprovação</div>${fdate(ce.data) || '—'}</div><div><div class="lbl">Área</div>${ce.area ? esc(ce.area) + ' m²' : '—'}</div><div><div class="lbl">Valor</div>${brl(ce.valor)}</div></div>
+        <div class="grid g3"><div><div class="lbl">Aprovação</div>${fdate(ce.data) || '—'}</div><div><div class="lbl">Área</div>${ce.area ? esc(String(ce.area).replace('.', ',')) + ' m²' : '—'}</div><div><div class="lbl">Valor</div>${brl(ce.valor)}</div></div>
         <div class="sub-h">Contrato da montadora</div>
         <div class="grid g3"><div><div class="lbl">Data</div>${fdate(mo.data) || '—'}</div><div><div class="lbl">Montadora</div>${esc(mo.nome || '—')}</div><div><div class="lbl">Valor</div>${brl(mo.valor)}</div></div>
       </div>
       <div class="card"><div class="card-h"><h3>Serviços contratados</h3></div>
-        ${tabela([['Item'], ['Qtde', 'r'], ['Valor', 'r']], (d.servicos || []).filter((s) => s.qt || s.valor).map((s) => [esc(s.nome), s.qt || '—', brl(s.valor)]), st.servicos)}</div>
+        ${tabela([['Item'], ['Qtde', 'r'], ['Valor', 'r']], (d.servicos || []).filter((s) => s.qt || s.valor).map((s) => [esc(s.nome), esc(s.qt || '—'), brl(s.valor)]), st.servicos)}</div>
       <div class="card"><div class="card-h"><h3>Gastos diversos</h3></div>
-        ${tabela([['Item'], ['Qtde', 'r'], ['Obs.'], ['Valor', 'r']], (d.gastos || []).filter((g) => g.qt || g.valor || g.obs).map((g) => [esc(g.nome), g.qt || '—', esc(g.obs || ''), brl(g.valor)]), st.gastos)}</div>
+        ${tabela([['Item'], ['Qtde', 'r'], ['Obs.'], ['Valor', 'r']], (d.gastos || []).filter((g) => g.qt || g.valor || g.obs).map((g) => [esc(g.nome), esc(g.qt || '—'), esc(g.obs || ''), brl(g.valor)]), st.gastos)}</div>
       <div class="card full"><div class="card-h"><h3>Envolvidos</h3></div>
         ${(d.envolvidos || []).length ? `<div class="people">${d.envolvidos.map((n) => `<span class="person"><span class="avatar sm">${esc(iniciais(n))}</span>${esc(n)}</span>`).join('')}</div>` : '<p class="muted small" style="margin:0">Nenhum envolvido informado.</p>'}</div>
       <div class="card full"><div class="card-h"><h3>Hospedagem</h3></div><div style="overflow-x:auto">
@@ -932,7 +977,7 @@ function campoRep(c, v) {
   let inp;
   if (c.t === 'select') inp = `<select data-k="${c.k}">${c.opts.map((o) => `<option ${v === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
   else if (c.t === 'money') inp = `<div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-k="${c.k}" value="${fmtNum(v)}" placeholder="0,00" autocomplete="off"></div>`;
-  else inp = `<input type="${c.t || 'text'}" data-k="${c.k}" value="${esc(v ?? '')}" ${c.list ? `list="${c.list}"` : ''} placeholder="${esc(c.ph || '')}" autocomplete="off">`;
+  else inp = `<input type="${c.t || 'text'}" data-k="${c.k}" value="${esc(v ?? '')}" ${c.list ? `list="${c.list}"` : ''} placeholder="${esc(c.ph || '')}" maxlength="200" autocomplete="off">`;
   if (!c.l) return inp;
   return `<div class="field ${c.span === 2 ? 'span2' : ''}"><label>${c.l}</label>${inp}</div>`;
 }
@@ -950,10 +995,10 @@ function itemHtml(grupo, it) {
   const obs = grupo === 'gastos';
   const cheio = it.qt || it.valor;
   return `<tr data-item ${it.fixo ? `data-fixo="1" data-nome="${esc(it.nome)}"` : ''} class="${cheio ? 'has' : ''}">
-    <td class="it">${it.fixo ? esc(it.nome) : `<input data-k="nome" value="${esc(it.nome)}" placeholder="Descrição do item" style="min-width:150px">`}</td>
+    <td class="it">${it.fixo ? esc(it.nome) : `<input data-k="nome" value="${esc(it.nome)}" placeholder="Descrição do item" maxlength="120" style="min-width:150px">`}</td>
     <td class="q"><input type="number" min="0" step="1" inputmode="numeric" data-k="qt" value="${esc(it.qt ?? '')}" placeholder="0"></td>
     <td class="v"><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-k="valor" value="${fmtNum(it.valor)}" placeholder="0,00" autocomplete="off"></div></td>
-    ${obs ? `<td class="o"><input data-k="obs" value="${esc(it.obs || '')}" placeholder="Observação"></td>` : ''}
+    ${obs ? `<td class="o"><input data-k="obs" value="${esc(it.obs || '')}" placeholder="Observação" maxlength="300"></td>` : ''}
     <td class="x">${it.fixo ? '' : `<button type="button" class="btn btn-ghost icon-btn" data-rm-item title="Remover" aria-label="Remover">${ic('x')}</button>`}</td></tr>`;
 }
 
@@ -993,8 +1038,8 @@ async function viewForm(id, duplicar = false) {
           <div class="field"><label for="f-tipo">Tipo de evento</label><select id="f-tipo">${TIPOS.map((t) => `<option ${ev.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}${TIPOS.includes(ev.tipo) ? '' : `<option selected>${esc(ev.tipo)}</option>`}</select></div>
           <div class="field"><label for="f-inicio">Data de início</label><input id="f-inicio" type="date" value="${esc(ev.data_inicio || '')}"></div>
           <div class="field"><label for="f-fim">Data de término</label><input id="f-fim" type="date" value="${esc(ev.data_fim || '')}"></div>
-          <div class="field"><label for="f-gerente">Gerente responsável</label><input id="f-gerente" list="dl-ger" value="${esc(ev.gerente)}" placeholder="Nome do gerente"></div>
-          <div class="field span-all"><label for="f-local">Local do evento</label><input id="f-local" list="dl-loc" value="${esc(ev.local)}" placeholder="Pavilhão, cidade/UF"></div>
+          <div class="field"><label for="f-gerente">Gerente responsável</label><input id="f-gerente" list="dl-ger" value="${esc(ev.gerente)}" placeholder="Nome do gerente" maxlength="150"></div>
+          <div class="field span-all"><label for="f-local">Local do evento</label><input id="f-local" list="dl-loc" value="${esc(ev.local)}" placeholder="Pavilhão, cidade/UF" maxlength="300"></div>
         </div>
       </section>
 
@@ -1009,7 +1054,7 @@ async function viewForm(id, duplicar = false) {
         <div class="sub-h">Contrato da montadora</div>
         <div class="grid g3">
           <div class="field"><label for="f-mo-data">Data do contrato</label><input id="f-mo-data" type="date" value="${esc(d.montadora.data)}"></div>
-          <div class="field"><label for="f-mo-nome">Montadora</label><input id="f-mo-nome" value="${esc(d.montadora.nome)}" placeholder="Nome da montadora"></div>
+          <div class="field"><label for="f-mo-nome">Montadora</label><input id="f-mo-nome" value="${esc(d.montadora.nome)}" placeholder="Nome da montadora" maxlength="200"></div>
           <div class="field"><label for="f-mo-valor">Valor</label><div class="prefix"><span>R$</span><input id="f-mo-valor" class="money" inputmode="decimal" value="${fmtNum(d.montadora.valor)}" placeholder="0,00"></div></div>
         </div>
       </section>
@@ -1048,7 +1093,7 @@ async function viewForm(id, duplicar = false) {
 
       <section class="card">
         ${secH(9, 'Observações', 'Informações adicionais sobre o evento')}
-        <textarea id="f-obs" placeholder="Opcional">${esc(d.observacoes)}</textarea>
+        <textarea id="f-obs" placeholder="Opcional" maxlength="5000">${esc(d.observacoes)}</textarea>
       </section>
     </div>
 
@@ -1075,7 +1120,7 @@ async function viewForm(id, duplicar = false) {
     const v = (id) => $('#f-' + id).value.trim();
     const itens = (g) => $$(`#it-${g} tr[data-item]`).map((tr) => {
       const q = $('[data-k=qt]', tr).value;
-      const o = { nome: tr.dataset.fixo ? tr.dataset.nome : $('[data-k=nome]', tr).value.trim(), fixo: !!tr.dataset.fixo, qt: q === '' ? '' : Math.max(0, Number(q)), valor: parseMoney($('[data-k=valor]', tr).value) };
+      const o = { nome: tr.dataset.fixo ? tr.dataset.nome : $('[data-k=nome]', tr).value.trim(), fixo: !!tr.dataset.fixo, qt: q === '' ? '' : Math.min(999999, Math.max(0, Math.round(Number(q)) || 0)), valor: parseMoney($('[data-k=valor]', tr).value) };
       const ob = $('[data-k=obs]', tr);
       if (ob) o.obs = ob.value.trim();
       return o;
@@ -1190,8 +1235,8 @@ async function viewForm(id, duplicar = false) {
 
     const temAlgo = (o) => Object.entries(o).some(([k, v]) => k !== 'meio' && v !== '' && v !== 0 && v != null);
     const dd = f.dados;
-    dd.servicos = dd.servicos.filter((s) => s.qt || s.valor || (!s.fixo && s.nome));
-    dd.gastos = dd.gastos.filter((g) => g.qt || g.valor || g.obs || (!g.fixo && g.nome));
+    dd.servicos = dd.servicos.filter((s) => s.qt || s.valor || (!s.fixo && s.nome)).map((s) => ({ ...s, nome: s.nome || 'Outro serviço' }));
+    dd.gastos = dd.gastos.filter((g) => g.qt || g.valor || g.obs || (!g.fixo && g.nome)).map((g) => ({ ...g, nome: g.nome || 'Outro gasto' }));
     dd.envolvidos = dd.envolvidos.filter(Boolean);
     dd.hospedagem = dd.hospedagem.filter(temAlgo);
     dd.alimentacao = dd.alimentacao.filter(temAlgo);
@@ -1309,7 +1354,7 @@ async function viewRelatorios() {
 
 function exportarCsv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
-  const q = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const q = (s) => { let t = String(s ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
   const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Local', 'Gerente', 'Início', 'Término', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por'];
   const linhas = lista.map((e) => {
     const st = subtotais(e.dados);
@@ -1380,7 +1425,8 @@ async function viewUsuarios() {
   const ordenados = [...pend, ...perfis.filter((p) => p.ativo)];
 
   view().innerHTML = `
-    <div class="info">${ic('info')}<div><b>Como dar acesso a alguém:</b> envie o link do sistema. A pessoa clica em <b>Criar conta</b>, confirma o e-mail e aparece aqui como <b>Pendente</b>. Ligue o acesso e escolha o papel.<br>
+    <div class="info">${ic('info')}<div><b>Como dar acesso a alguém:</b> envie o link do sistema. A pessoa clica em <b>Criar conta</b> e aparece aqui como <b>Pendente</b>. Ligue o acesso e escolha o papel.<br>
+      <b>Atenção:</b> o e-mail não é verificado automaticamente. Antes de liberar, confirme com a pessoa (WhatsApp ou pessoalmente) que foi ela mesma que se cadastrou.<br>
       <b>Administrador</b> edita e exclui qualquer evento e gerencia usuários. <b>Usuário</b> vê todos os eventos, mas edita e exclui só os que criou.</div></div>
     ${pend.length ? `<div class="info warn">${ic('hourglass')}<div><b>${pend.length} pessoa(s) aguardando aprovação.</b></div></div>` : ''}
     <div class="card"><div class="tbl-wrap"><table class="tbl">
@@ -1392,7 +1438,7 @@ async function viewUsuarios() {
           <td><select class="role-sel" data-papel ${eu ? 'disabled title="Você não pode alterar o próprio papel"' : ''}><option value="usuario" ${p.papel === 'usuario' ? 'selected' : ''}>Usuário</option><option value="admin" ${p.papel === 'admin' ? 'selected' : ''}>Administrador</option></select></td>
           <td><label class="toggle" ${eu ? 'style="opacity:.5;pointer-events:none"' : ''}><input type="checkbox" data-ativo ${p.ativo ? 'checked' : ''} ${eu ? 'disabled' : ''}><span class="sw"></span><span data-lbl>${p.ativo ? 'Liberado' : '<span class="pill amber">Pendente</span>'}</span></label></td>
           <td class="right num">${evs.filter((e) => e.criado_por === p.id).length}</td>
-          <td class="small muted nowrap">${fdate((p.criado_em || '').slice(0, 10))}</td>
+          <td class="small muted nowrap">${fdia(p.criado_em)}</td>
           <td class="right">${eu ? '' : `<button class="btn btn-sm" data-senha title="Definir uma senha provisória para esta pessoa">${ic('key')}Senha provisória</button>`}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
 
@@ -1402,9 +1448,9 @@ async function viewUsuarios() {
     $('[data-senha]', tr)?.addEventListener('click', () => modal({
       title: `Senha provisória para ${p.nome}`, icon: 'key', ok: 'Definir senha',
       text: 'Informe a nova senha e passe para a pessoa por um canal seguro. Ela pode trocar depois, no ícone de chave.',
-      body: `<div class="field"><label>Nova senha (mínimo 6 caracteres)</label><input type="text" name="s1" autocomplete="off"></div>`,
+      body: `<div class="field"><label>Nova senha (mínimo 8 caracteres)</label><input type="text" name="s1" autocomplete="off"></div>`,
       onSubmit: async ({ s1 }) => {
-        if ((s1 || '').length < 6) throw new Error('A senha precisa ter pelo menos 6 caracteres.');
+        if ((s1 || '').length < 8) throw new Error('A senha precisa ter pelo menos 8 caracteres.');
         await api.adminSenha(id, s1);
         toast('Senha provisória definida para ' + p.nome);
       },
