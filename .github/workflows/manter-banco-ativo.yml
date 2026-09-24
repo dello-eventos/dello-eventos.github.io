@@ -1,5 +1,9 @@
 # Evita que o projeto gratuito do Supabase seja pausado por inatividade (pausa após 7 dias sem uso).
 # Faz uma consulta leve a cada 3 dias. Não lê nem altera dados.
+#
+# O GitHub desativa tarefas agendadas em repositórios sem alterações há 60 dias.
+# Por isso, se o último commit tiver mais de 45 dias, esta tarefa registra um commit mínimo
+# (arquivo .github/ultima-verificacao.txt) para continuar ativa.
 name: Manter banco ativo
 
 on:
@@ -8,16 +12,37 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Consultar Supabase
         run: |
           URL=$(grep -oP "supabaseUrl:\s*'\K[^']+" assets/config.js)
           KEY=$(grep -oP "supabaseAnonKey:\s*'\K[^']+" assets/config.js)
-          curl -s -o /dev/null -w "auth: %{http_code}\n" "$URL/auth/v1/settings" -H "apikey: $KEY"
-          curl -s -o /dev/null -w "rest: %{http_code}\n" "$URL/rest/v1/eventos?select=id&limit=1" -H "apikey: $KEY"
+          AUTH=$(curl -s -o /dev/null -w "%{http_code}" "$URL/auth/v1/settings" -H "apikey: $KEY")
+          REST=$(curl -s -o /dev/null -w "%{http_code}" "$URL/rest/v1/eventos?select=id&limit=1" -H "apikey: $KEY")
+          echo "auth: $AUTH / rest: $REST"
+          if [ "$AUTH" != "200" ]; then
+            echo "::error::O Supabase não respondeu (código $AUTH). Verifique se o projeto foi pausado em supabase.com."
+            exit 1
+          fi
+
+      - name: Manter a tarefa ativa no GitHub
+        run: |
+          ULTIMO=$(git log -1 --format=%ct)
+          AGORA=$(date +%s)
+          DIAS=$(( (AGORA - ULTIMO) / 86400 ))
+          echo "Último commit há $DIAS dias."
+          if [ "$DIAS" -ge 45 ]; then
+            date -u +"%Y-%m-%d %H:%M UTC" > .github/ultima-verificacao.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/ultima-verificacao.txt
+            git commit -m "Verificação automática: manter tarefa ativa"
+            git push
+          fi
