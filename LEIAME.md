@@ -2,10 +2,10 @@
 
 Sistema para cadastrar, aprovar e acompanhar o investimento em eventos (feiras, convenções, workshops, ações em cliente etc.).
 
-**Endereço:** https://henriquegambin.github.io/dello-eventos/
+**Endereço:** https://dello-eventos.github.io/
 
 **Custo: R$ 0.** O sistema usa só planos gratuitos:
-- **Site:** GitHub Pages, repositório `HenriqueGambin/dello-eventos`.
+- **Site:** GitHub Pages, repositório `dello-eventos/dello-eventos.github.io` (organização **dello-eventos**).
 - **Banco de dados e login:** Supabase, projeto `dello-eventos`, organização **Dello**, região São Paulo.
 - **Manter o banco ativo:** uma tarefa do GitHub Actions faz uma consulta leve a cada 3 dias. Assim o Supabase gratuito não pausa por falta de uso.
 
