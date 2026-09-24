@@ -616,3 +616,5 @@ input.invalid, select.invalid { border-color: var(--red); box-shadow: 0 0 0 3px 
   .ficha { display: block; }
   .ficha * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+.local-hora { display: grid; grid-template-columns: minmax(0, 1fr) 170px 170px; gap: 16px; }
+@media (max-width: 640px) { .local-hora { grid-template-columns: 1fr 1fr; } .local-hora > .field:first-child { grid-column: 1 / -1; } }
