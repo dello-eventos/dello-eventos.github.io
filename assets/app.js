@@ -14,7 +14,7 @@ const SIT = {
   aprovado:  { label: 'Aprovado',     cor: 'green', hex: '#17925A', cx: 'Verde' },
 };
 const SIT_ORDEM = ['reprovado', 'analise', 'aprovado'];
-const TIPOS = ['Feira', 'Convenção', 'Workshop', 'Ação em cliente', 'Show room', 'Visita na fábrica', 'Palestra'];
+const TIPOS = ['Feira', 'Convenção', 'Workshop', 'Ação em cliente', 'Show room', 'Visita na fábrica', 'Palestra', 'Confraternização'];
 const SERVICOS = ['Bancada', 'Prateleiras', 'Mesa', 'Cadeiras', 'TV'];
 const GASTOS = ['Catálogo', 'Amostras', 'Brindes', 'Camisetas', 'Banner', 'Banco', 'Base giratória', 'Suportes', 'Plataforma', 'Toalhas', 'Flores', 'Outros'];
 const MEIOS = ['Aéreo', 'Ônibus', 'Carro'];

@@ -48,6 +48,8 @@ Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rod
   - total somado na hora.
 - **Tecla Enter:** avança de campo em campo, abre uma nova linha no fim de uma linha preenchida e, numa linha vazia, pula para a próxima seção.
 - **Duplicar evento:** útil para feiras que se repetem.
+- **Fotos e arquivos:** na página do evento, envie fotos do estande, projeto, contratos (JPG, PNG, WEBP, GIF ou PDF, até 10 MB). Fotos grandes são reduzidas automaticamente. Todos os aprovados veem; só quem criou o evento ou um admin envia e exclui. Espaço grátis: 1 GB.
+- **Aplicativo:** botão **Instalar aplicativo** no menu cria um ícone na área de trabalho (Chrome/Edge) ou na tela inicial do celular.
 - **Relatórios:**
   - por situação, evento, gerente, tipo ou período;
   - formato resumido ou detalhado;
@@ -70,6 +72,8 @@ assets/app.js                        sistema (telas, regras, relatórios)
 assets/styles.css                    visual (cores e fonte da Dello)
 assets/config.js                     conexão com o Supabase
 assets/logo-dello.png                logo
+assets/icons/                        ícones do aplicativo
+manifest.webmanifest                 configuração do aplicativo instalável
 supabase/schema.sql                  tabelas, permissões e histórico (já aplicado)
 supabase/opcional-senha-provisoria.sql  senha provisória definida pelo admin (já aplicado)
 .github/workflows/manter-banco-ativo.yml  consulta a cada 3 dias para o banco não pausar
