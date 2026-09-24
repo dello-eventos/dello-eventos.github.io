@@ -127,11 +127,20 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2));
 const iniciais = (n) => String(n || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join('').toUpperCase() || '?';
 const primeiroNome = (n) => String(n || '').trim().split(/\s+/)[0] || '';
-const periodo = (e) => {
+const hora = (h) => /^\d{2}:\d{2}/.test(String(h || '')) ? String(h).slice(0, 5) : '';
+const horarioTexto = (e) => {
+  const hi = hora(e?.dados?.hora_inicio), hf = hora(e?.dados?.hora_fim);
+  if (hi && hf) return `${hi} às ${hf}`;
+  if (hi) return `a partir das ${hi}`;
+  if (hf) return `até ${hf}`;
+  return '';
+};
+const soDatas = (e) => {
   const i = e.data_inicio, f = e.data_fim;
   if (i && f && i !== f) return `${fdate(i)} a ${fdate(f)}`;
   return fdate(i || f) || 'Sem data';
 };
+const periodo = (e) => soDatas(e) + (horarioTexto(e) ? ' · ' + horarioTexto(e) : '');
 // Tipos padrão + tipos escritos à mão que já existem nos eventos
 const tiposDe = (evs) => [...TIPOS, ...uniq((evs || []).map((e) => e.tipo)).filter((t) => t && !TIPOS.includes(t))];
 const clienteTexto = (c = {}) => [c.codigo && 'Cód. ' + c.codigo, c.nome].filter((x) => String(x || '').trim()).join(' · ');
@@ -1272,6 +1281,8 @@ function normalizarDados(d = {}) {
     contratoEvento: { data: '', area: '', valor: '', ...(d.contratoEvento || {}) },
     montadora: { data: '', nome: '', valor: '', ...(d.montadora || {}) },
     cliente: { codigo: '', nome: '', ...(d.cliente || {}) },
+    hora_inicio: typeof d.hora_inicio === 'string' ? d.hora_inicio : '',
+    hora_fim: typeof d.hora_fim === 'string' ? d.hora_fim : '',
     entrega: { destinatario: '', telefone: '', email: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '', ...(d.entrega || {}) },
     servicos: fx(SERVICOS, d.servicos), gastos: fx(GASTOS, d.gastos),
     envolvidos: [...(d.envolvidos || [])], hospedagem: [...(d.hospedagem || [])],
@@ -1353,7 +1364,11 @@ async function viewForm(id, duplicar = false) {
           <div class="field"><label for="f-inicio">Data de início</label><input id="f-inicio" type="date" value="${esc(ev.data_inicio || '')}"></div>
           <div class="field"><label for="f-fim">Data de término</label><input id="f-fim" type="date" value="${esc(ev.data_fim || '')}"></div>
           <div class="field"><label for="f-gerente">Gerente responsável</label><input id="f-gerente" list="dl-ger" value="${esc(ev.gerente)}" placeholder="Nome do gerente" maxlength="150"></div>
-          <div class="field span-all"><label for="f-local">Local do evento</label><input id="f-local" list="dl-loc" value="${esc(ev.local)}" placeholder="Pavilhão, cidade/UF" maxlength="300"></div>
+          <div class="span-all local-hora">
+            <div class="field"><label for="f-local">Local do evento</label><input id="f-local" list="dl-loc" value="${esc(ev.local)}" placeholder="Pavilhão, cidade/UF" maxlength="300"></div>
+            <div class="field"><label for="f-hini">Horário de início</label><input id="f-hini" type="time" value="${esc(hora(d.hora_inicio))}"></div>
+            <div class="field"><label for="f-hfim">Horário de término</label><input id="f-hfim" type="time" value="${esc(hora(d.hora_fim))}"></div>
+          </div>
         </div>
       </section>
 
@@ -1483,6 +1498,7 @@ async function viewForm(id, duplicar = false) {
         contratoEvento: { data: v('ce-data'), area: area ? parseMoney(area) : '', valor: parseMoney(v('ce-valor')) },
         montadora: { data: v('mo-data'), nome: v('mo-nome'), valor: parseMoney(v('mo-valor')) },
         cliente: { codigo: v('cli-cod'), nome: v('cli-nome') },
+        hora_inicio: v('hini'), hora_fim: v('hfim'),
         entrega: {
           destinatario: v('en-dest'), telefone: v('en-tel'), email: v('en-email').toLowerCase(), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
           complemento: v('en-comp'), bairro: v('en-bairro'), cidade: v('en-cidade'), uf: v('en-uf'),
@@ -1790,10 +1806,10 @@ async function viewRelatorios() {
 function exportarCsv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
   const q = (s) => { let t = String(s ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
-  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Cód. cliente', 'Cliente', 'Local', 'Gerente', 'Início', 'Término', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega'];
+  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Cód. cliente', 'Cliente', 'Local', 'Gerente', 'Início', 'Término', 'Horário', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega'];
   const linhas = lista.map((e) => {
     const st = subtotais(e.dados);
-    return [pad(e.numero), SIT[e.situacao]?.label, e.tipo, e.nome, clienteDe(e).codigo || '', clienteDe(e).nome || '', e.local, e.gerente, fdate(e.data_inicio), fdate(e.data_fim),
+    return [pad(e.numero), SIT[e.situacao]?.label, e.tipo, e.nome, clienteDe(e).codigo || '', clienteDe(e).nome || '', e.local, e.gerente, fdate(e.data_inicio), fdate(e.data_fim), horarioTexto(e),
       n(st.contratos), n(st.servicos), n(st.gastos), n(st.hospedagem), n(st.alimentacao), n(st.passagens), n(e.valor_total), nomeDe(e.criado_por),
       enderecoTexto(e.dados?.entrega || {}), e.dados?.entrega?.destinatario || '', fdate(e.dados?.entrega?.data)].map(q).join(';');
   });

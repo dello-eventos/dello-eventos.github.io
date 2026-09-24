@@ -44,6 +44,7 @@ Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rod
 - **Eventos:** busca e filtros por situação, tipo, gerente e "só os meus".
 - **Cadastro do evento:**
   - situação por cor e número sequencial automático;
+  - local com horário de início e de término;
   - código e nome do cliente que promove o evento (o nome se completa pelo código já usado);
   - tipo de evento da lista ou escrito à mão ("Outro (escrever)");
   - endereço de entrega de produtos (com e-mail do cliente), preenchimento automático pelo CEP (ViaCEP, gratuito) e botão "Abrir no mapa";
