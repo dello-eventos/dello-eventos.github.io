@@ -136,14 +136,14 @@ const periodo = (e) => {
 const tiposDe = (evs) => [...TIPOS, ...uniq((evs || []).map((e) => e.tipo)).filter((t) => t && !TIPOS.includes(t))];
 const clienteTexto = (c = {}) => [c.codigo && 'Cód. ' + c.codigo, c.nome].filter((x) => String(x || '').trim()).join(' · ');
 const clienteDe = (e) => e?.dados?.cliente || {};
-const temEntrega = (en) => !!en && ['destinatario', 'telefone', 'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'data', 'horario', 'obs'].some((k) => String(en[k] || '').trim());
+const temEntrega = (en) => !!en && ['destinatario', 'telefone', 'email', 'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'data', 'horario', 'obs'].some((k) => String(en[k] || '').trim());
 const enderecoTexto = (en = {}) => [
   [en.rua, en.numero].filter(Boolean).join(', ') + (en.complemento ? ` — ${en.complemento}` : ''),
   en.bairro, [en.cidade, en.uf].filter(Boolean).join('/'), en.cep && 'CEP ' + en.cep,
 ].filter((x) => String(x || '').trim()).join(' · ');
 const enderecoMapa = (en = {}) => [[en.rua, en.numero].filter(Boolean).join(', '), en.bairro, [en.cidade, en.uf].filter(Boolean).join(' - '), en.cep].filter((x) => String(x || '').trim()).join(', ');
 const entregaTexto = (en = {}) => [
-  enderecoTexto(en), en.destinatario && 'Recebe: ' + en.destinatario + (en.telefone ? ' (' + en.telefone + ')' : ''),
+  enderecoTexto(en), en.destinatario && 'Recebe: ' + en.destinatario + ([en.telefone, en.email].filter(Boolean).length ? ' (' + [en.telefone, en.email].filter(Boolean).join(', ') + ')' : ''),
   (en.data || en.horario) && 'Entrega: ' + [fdate(en.data), en.horario].filter(Boolean).join(' '), en.obs,
 ].filter(Boolean).join(' · ');
 const pill = (s) => SIT[s] ? `<span class="pill ${SIT[s].cor}">${SIT[s].label}</span>` : '';
@@ -305,11 +305,11 @@ function SupaAPI() {
       return r[0];
     },
     async adminSenha(id, senha) { chk(await sb.rpc('admin_definir_senha', { usuario: id, nova_senha: senha })); },
-    async listarAnexos(evId) {
+    async listarAnexos(evId, validade = 3600) {
       const itens = chk(await sb.storage.from('anexos').list(evId, { limit: 500, sortBy: { column: 'created_at', order: 'asc' } })).filter((f) => f.id);
       if (!itens.length) return [];
       const paths = itens.map((f) => `${evId}/${f.name}`);
-      const urls = chk(await sb.storage.from('anexos').createSignedUrls(paths, 3600));
+      const urls = chk(await sb.storage.from('anexos').createSignedUrls(paths, validade));
       return itens.map((f, i) => ({ path: paths[i], nome: f.name, tipo: f.metadata?.mimetype || '', tamanho: f.metadata?.size || 0, criado_em: f.created_at, url: urls[i]?.signedUrl || '' }));
     },
     async enviarAnexo(evId, arquivo, nome) {
@@ -1019,7 +1019,7 @@ async function viewDetalhe(id) {
         ${temEntrega(d.entrega) ? `<button type="button" class="btn btn-sm no-print" id="enCopiar">${ic('copy')}Copiar</button>` : ''}</div>
         ${temEntrega(d.entrega) ? `<div class="grid g4">
           <div class="span2"><div class="lbl">Endereço</div>${esc(enderecoTexto(d.entrega)) || '—'}</div>
-          <div><div class="lbl">Quem recebe</div>${esc(d.entrega.destinatario || '—')}${d.entrega.telefone ? `<div class="small muted">${esc(d.entrega.telefone)}</div>` : ''}</div>
+          <div><div class="lbl">Quem recebe</div>${esc(d.entrega.destinatario || '—')}${d.entrega.telefone ? `<div class="small muted">${esc(d.entrega.telefone)}</div>` : ''}${d.entrega.email ? `<div class="small"><a href="mailto:${encodeURIComponent(d.entrega.email)}">${esc(d.entrega.email)}</a></div>` : ''}</div>
           <div><div class="lbl">Entrega</div>${fdate(d.entrega.data) || '—'}${d.entrega.horario ? `<div class="small muted">${esc(d.entrega.horario)}</div>` : ''}</div>
           ${d.entrega.obs ? `<div class="span-all"><div class="lbl">Observações</div>${esc(d.entrega.obs)}</div>` : ''}
         </div>` : '<p class="muted small" style="margin:0">Nenhum endereço de entrega informado.</p>'}</div>
@@ -1044,6 +1044,7 @@ async function viewDetalhe(id) {
       ${d.observacoes ? `<div class="card full"><div class="card-h"><h3>Observações</h3></div><div style="white-space:pre-wrap">${esc(d.observacoes)}</div></div>` : ''}
       <div class="card full" id="anxCard"><div class="card-h"><h3>Fotos e arquivos <span class="muted small" id="anxCount"></span></h3><span class="sp"></span>
         <span class="small muted hidden no-print" id="anxStatus"></span>
+        <button type="button" class="btn btn-sm no-print hidden" id="anxEmail" title="Enviar os links das fotos e arquivos por e-mail">${ic('mail')}Enviar por e-mail</button>
         ${pode ? `<label class="btn btn-sm btn-primary no-print" for="anxInput">${ic('upload')}Adicionar</label><input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">` : ''}</div>
         <div id="anxBox"></div></div>
       <div class="card full no-print"><div class="card-h"><h3>Histórico deste evento</h3></div><div id="dHist"><div class="spinner"></div></div></div>
@@ -1055,6 +1056,22 @@ async function viewDetalhe(id) {
     catch { toast('Não foi possível copiar', 'err'); }
   });
   carregarAnexos(e, pode);
+  $('#anxEmail').addEventListener('click', async () => {
+    const btn = $('#anxEmail');
+    btn.disabled = true;
+    try {
+      const lista = await api.listarAnexos(e.id, 7 * 24 * 3600);
+      if (!lista.length) { toast('Este evento ainda não tem arquivos.', 'err'); return; }
+      const para = d.entrega?.email || '';
+      const corpo = `Olá${d.entrega?.destinatario ? ', ' + d.entrega.destinatario : ''}!\n\nSeguem as fotos e arquivos do evento "${e.nome}"${e.data_inicio ? ' (' + periodo(e) + ')' : ''}:\n\n` +
+        lista.map((a, i) => `${i + 1}. ${nomeExibicao(a.nome)}\n${a.url}`).join('\n\n') +
+        `\n\nOs links ficam disponíveis por 7 dias.\n\nAtenciosamente,\n${S.me.nome}\nDello`;
+      if (corpo.length > 12000) toast('Muitos arquivos: o e-mail pode ficar grande demais. Se não abrir, envie em partes.', 'err');
+      location.href = `mailto:${encodeURIComponent(para)}?subject=${encodeURIComponent('Fotos e arquivos — ' + e.nome)}&body=${encodeURIComponent(corpo)}`;
+      if (!para) toast('Sem e-mail do cliente cadastrado: preencha o destinatário no seu e-mail.');
+    } catch (x) { toast(msgErro(x), 'err'); }
+    finally { btn.disabled = false; }
+  });
   if (pode) {
     $('#anxInput').onchange = (x) => { enviarAnexos(e, x.target.files, pode); x.target.value = ''; };
     const card = $('#anxCard');
@@ -1104,9 +1121,11 @@ async function carregarAnexos(ev, pode) {
   if (!$('#anxBox')) return;
   $('#anxCount').textContent = lista.length ? `(${lista.length})` : '';
   if (!lista.length) {
+    $('#anxEmail')?.classList.add('hidden');
     box.innerHTML = `<div class="anx-empty">${ic('image')}<div>${pode ? 'Nenhum arquivo ainda. Clique em <b>Adicionar</b> ou arraste fotos e PDFs para cá (fotos do estande, projeto, contratos…).' : 'Nenhum arquivo anexado.'}</div></div>`;
     return;
   }
+  $('#anxEmail')?.classList.remove('hidden');
   const imgs = lista.filter((a) => a.tipo.startsWith('image/'));
   box.innerHTML = `<div class="anx-grid">${lista.map((a, i) => {
     const img = a.tipo.startsWith('image/'), nome = esc(nomeExibicao(a.nome));
@@ -1204,7 +1223,7 @@ function normalizarDados(d = {}) {
     contratoEvento: { data: '', area: '', valor: '', ...(d.contratoEvento || {}) },
     montadora: { data: '', nome: '', valor: '', ...(d.montadora || {}) },
     cliente: { codigo: '', nome: '', ...(d.cliente || {}) },
-    entrega: { destinatario: '', telefone: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '', ...(d.entrega || {}) },
+    entrega: { destinatario: '', telefone: '', email: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '', ...(d.entrega || {}) },
     servicos: fx(SERVICOS, d.servicos), gastos: fx(GASTOS, d.gastos),
     envolvidos: [...(d.envolvidos || [])], hospedagem: [...(d.hospedagem || [])],
     alimentacao: [...(d.alimentacao || [])], passagens: [...(d.passagens || [])],
@@ -1292,8 +1311,9 @@ async function viewForm(id, duplicar = false) {
       <section class="card">
         ${secH(2, 'Endereço de entrega', 'Para onde enviar produtos, amostras e materiais do evento')}
         <div class="grid g4">
-          <div class="field span2"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
+          <div class="field"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
           <div class="field"><label for="f-en-tel">Telefone</label><input id="f-en-tel" type="tel" value="${esc(d.entrega.telefone)}" maxlength="40" placeholder="(00) 00000-0000"></div>
+          <div class="field"><label for="f-en-email">E-mail do cliente</label><input id="f-en-email" type="email" value="${esc(d.entrega.email)}" maxlength="200" placeholder="nome@empresa.com.br"></div>
           <div class="field"><label for="f-en-cep">CEP</label><input id="f-en-cep" inputmode="numeric" value="${esc(d.entrega.cep)}" maxlength="9" placeholder="00000-000"><div class="hint" id="cepMsg">Preenche o endereço sozinho</div></div>
           <div class="field span2"><label for="f-en-rua">Endereço</label><input id="f-en-rua" value="${esc(d.entrega.rua)}" maxlength="200" placeholder="Rua, avenida…"></div>
           <div class="field"><label for="f-en-num">Número</label><input id="f-en-num" value="${esc(d.entrega.numero)}" maxlength="20"></div>
@@ -1415,7 +1435,7 @@ async function viewForm(id, duplicar = false) {
         montadora: { data: v('mo-data'), nome: v('mo-nome'), valor: parseMoney(v('mo-valor')) },
         cliente: { codigo: v('cli-cod'), nome: v('cli-nome') },
         entrega: {
-          destinatario: v('en-dest'), telefone: v('en-tel'), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
+          destinatario: v('en-dest'), telefone: v('en-tel'), email: v('en-email').toLowerCase(), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
           complemento: v('en-comp'), bairro: v('en-bairro'), cidade: v('en-cidade'), uf: v('en-uf'),
           data: v('en-data'), horario: v('en-hora'), obs: v('en-obs'),
         },
@@ -1583,6 +1603,7 @@ async function viewForm(id, duplicar = false) {
     const erro = (id, msg) => { const el = $('#f-' + id); el.classList.add('invalid'); el.focus(); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); toast(msg, 'err'); };
     if (!f.nome) return erro('nome', 'Informe o nome do evento.');
     if (!f.tipo) return erro('tipo-outro', 'Escreva o tipo do evento.');
+    if (f.dados.entrega.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.dados.entrega.email)) return erro('en-email', 'E-mail do cliente inválido.');
     if (f.data_inicio && f.data_fim && f.data_fim < f.data_inicio) return erro('fim', 'A data de término é anterior à data de início.');
     if (f.dados.hospedagem.some((h) => h.chegada && h.saida && h.saida < h.chegada)) { toast('Há hospedagem com saída antes da chegada.', 'err'); return; }
 
