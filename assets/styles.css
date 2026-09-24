@@ -583,3 +583,36 @@ input.invalid, select.invalid { border-color: var(--red); box-shadow: 0 0 0 3px 
 .span3 { grid-column: span 3; }
 @media (max-width: 880px) { .g4 .span3 { grid-column: span 2; } }
 @media (max-width: 640px) { .g4 .span3 { grid-column: auto; } }
+
+/* ---------- ficha de impressão (1 página) ---------- */
+.ficha { font-size: 9.5pt; line-height: 1.35; color: #111; }
+.ficha .f-top { display: flex; gap: 14px; align-items: flex-start; border-bottom: 2px solid var(--brand); padding-bottom: 8px; margin-bottom: 8px; }
+.ficha .f-top img { width: 70px; margin-top: 2px; }
+.ficha .f-tit { flex: 1; min-width: 0; }
+.ficha .f-tit small { font-size: 8pt; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #666; }
+.ficha .f-tit h2 { font-size: 14pt; margin: 1px 0 2px; line-height: 1.2; }
+.ficha .f-tit div { font-size: 9pt; color: #333; }
+.ficha .f-tot { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.ficha .f-tot small { font-size: 7.5pt; text-transform: uppercase; letter-spacing: .06em; color: #666; font-weight: 700; margin-top: 3px; }
+.ficha .f-tot b { font-size: 15pt; color: var(--brand-700); }
+.ficha .pill { font-size: 8pt; padding: 1px 8px; }
+.ficha .f-cols { column-count: 2; column-gap: 16px; }
+.ficha .f-bl { break-inside: avoid; margin: 0 0 8px; border: 1px solid #ddd; border-radius: 6px; padding: 5px 8px 6px; }
+.ficha .f-bl h4 { margin: 0 0 3px; font-size: 8pt; text-transform: uppercase; letter-spacing: .06em; color: var(--brand-700); display: flex; justify-content: space-between; gap: 8px; }
+.ficha .f-bl h4 b { color: #111; letter-spacing: 0; }
+.ficha table { width: 100%; border-collapse: collapse; }
+.ficha td { padding: 1.5px 0; vertical-align: top; border-bottom: 1px dotted #ddd; }
+.ficha tr:last-child td { border-bottom: 0; }
+.ficha td.r { text-align: right; white-space: nowrap; padding-left: 8px; font-variant-numeric: tabular-nums; }
+.ficha td i { color: #555; font-style: normal; }
+.ficha .f-kv { margin: 1px 0; }
+.ficha .f-kv span { font-weight: 700; color: #555; margin-right: 4px; }
+.ficha p { margin: 0; }
+.ficha .f-obs { white-space: pre-wrap; }
+.ficha .f-sum td { font-weight: 800; border-top: 1px solid #999; padding-top: 3px; }
+.ficha .f-rod { display: flex; justify-content: space-between; gap: 10px; font-size: 7.5pt; color: #777; border-top: 1px solid #ddd; padding-top: 4px; margin-top: 4px; }
+@media print {
+  @page { size: A4; margin: 10mm; }
+  .ficha { display: block; }
+  .ficha * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
