@@ -270,3 +270,49 @@ alter table public.eventos drop constraint if exists eventos_tamanhos;
 alter table public.eventos add constraint eventos_tamanhos
   check (char_length(nome) <= 200 and char_length(local) <= 300 and char_length(gerente) <= 150
          and char_length(tipo) <= 60 and octet_length(dados::text) <= 300000);
+
+-- ---------------------------------------------------------------------
+-- Fotos e arquivos dos eventos (Supabase Storage, pasta privada "anexos")
+-- Caminho: <id do evento>/<arquivo>. Ver: usuários aprovados.
+-- Enviar/excluir: quem criou o evento ou admin. Até 10 MB; só fotos e PDF.
+-- ---------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('anexos', 'anexos', false, 10485760,
+        array['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+create or replace function public.evento_da_pasta(caminho text) returns uuid
+language plpgsql immutable set search_path = '' as $$
+begin
+  return split_part(caminho, '/', 1)::uuid;
+exception when others then
+  return null;
+end $$;
+
+create or replace function public.pode_editar_evento(evento uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_ativo() and exists (
+    select 1 from eventos where id = evento and (criado_por = auth.uid() or public.is_admin())
+  );
+$$;
+
+revoke execute on function public.pode_editar_evento(uuid) from public, anon;
+grant execute on function public.pode_editar_evento(uuid) to authenticated;
+
+drop policy if exists "anexos_ver" on storage.objects;
+create policy "anexos_ver" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'anexos' and public.is_ativo());
+
+drop policy if exists "anexos_enviar" on storage.objects;
+create policy "anexos_enviar" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'anexos' and public.pode_editar_evento(public.evento_da_pasta(name)));
+
+drop policy if exists "anexos_excluir" on storage.objects;
+create policy "anexos_excluir" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'anexos' and public.pode_editar_evento(public.evento_da_pasta(name)));

@@ -1,0 +1,17 @@
+{
+  "name": "Dello · Gestão de Eventos",
+  "short_name": "Dello Eventos",
+  "description": "Cadastro, aprovação e acompanhamento do investimento em eventos da Dello.",
+  "lang": "pt-BR",
+  "id": "./",
+  "start_url": "./#/painel",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F4F5F8",
+  "theme_color": "#EC6608",
+  "icons": [
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

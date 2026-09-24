@@ -79,6 +79,11 @@ const P = {
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
   hourglass: '<path d="M5 22h14M5 2h14M17 22v-4.2a2 2 0 0 0-.6-1.4L12 12l-4.4 4.4a2 2 0 0 0-.6 1.4V22M7 2v4.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4a2 2 0 0 0 .6-1.4V2"/>',
   refresh: '<path d="M21 12a9 9 0 0 1-15.5 6.2L3 16M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+  chevL: '<path d="m15 18-6-6 6-6"/>',
+  chevR: '<path d="m9 18 6-6-6-6"/>',
+  monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
   file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
 };
 const ic = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
@@ -176,6 +181,9 @@ function msgErro(e) {
   if (/row-level security|permission denied|PGRST116|0 rows/i.test(m)) return 'Você não tem permissão para esta ação.';
   if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Sem conexão com o servidor. Verifique a internet.';
   if (/admin_definir_senha|Could not find the function/i.test(m)) return 'Recurso de senha provisória não instalado. Rode o arquivo supabase/opcional-senha-provisoria.sql no Supabase.';
+  if (/Payload too large|maximum allowed size|exceeded/i.test(m)) return 'Arquivo maior que 10 MB.';
+  if (/mime type|invalid_mime/i.test(m)) return 'Tipo de arquivo não permitido. Use fotos (JPG, PNG, WEBP, GIF) ou PDF.';
+  if (/Bucket not found/i.test(m)) return 'O armazenamento de arquivos ainda não foi configurado.';
   if (/eventos_datas_ok/i.test(m)) return 'A data de término não pode ser anterior à data de início.';
   return m || 'Ocorreu um erro inesperado.';
 }
@@ -281,6 +289,24 @@ function SupaAPI() {
       return r[0];
     },
     async adminSenha(id, senha) { chk(await sb.rpc('admin_definir_senha', { usuario: id, nova_senha: senha })); },
+    async listarAnexos(evId) {
+      const itens = chk(await sb.storage.from('anexos').list(evId, { limit: 500, sortBy: { column: 'created_at', order: 'asc' } })).filter((f) => f.id);
+      if (!itens.length) return [];
+      const paths = itens.map((f) => `${evId}/${f.name}`);
+      const urls = chk(await sb.storage.from('anexos').createSignedUrls(paths, 3600));
+      return itens.map((f, i) => ({ path: paths[i], nome: f.name, tipo: f.metadata?.mimetype || '', tamanho: f.metadata?.size || 0, criado_em: f.created_at, url: urls[i]?.signedUrl || '' }));
+    },
+    async enviarAnexo(evId, arquivo, nome) {
+      chk(await sb.storage.from('anexos').upload(`${evId}/${Date.now()}-${nome}`, arquivo, { contentType: arquivo.type, upsert: false }));
+    },
+    async excluirAnexo(path) {
+      const r = chk(await sb.storage.from('anexos').remove([path]));
+      if (!r?.length) throw new Error('permission denied');
+    },
+    async limparAnexos(evId) {
+      const itens = chk(await sb.storage.from('anexos').list(evId, { limit: 1000 })).filter((f) => f.id);
+      if (itens.length) chk(await sb.storage.from('anexos').remove(itens.map((f) => `${evId}/${f.name}`)));
+    },
     async historico(eventoId) {
       let q = sb.from('historico').select('*').order('em', { ascending: false }).limit(400);
       if (eventoId) q = q.eq('evento_id', eventoId);
@@ -302,6 +328,7 @@ function DemoAPI() {
   const perfil = (id) => db.perfis.find((p) => p.id === id);
   const isAdmin = () => perfil(atual)?.papel === 'admin' && perfil(atual)?.ativo;
   const podeEditar = (ev) => isAdmin() || ev.criado_por === atual;
+  const anexosMem = {};
   const negar = () => { throw new Error('permission denied'); };
   const log = (acao, ev, detalhes = {}) => db.historico.unshift({
     id: ++db.hseq, evento_id: ev.id, evento_numero: ev.numero, evento_nome: ev.nome, acao,
@@ -408,6 +435,19 @@ function DemoAPI() {
       return clone(p);
     },
     async adminSenha() { if (!isAdmin()) negar(); },
+    async listarAnexos(id) { return (anexosMem[id] || []).slice(); },
+    async enviarAnexo(id, arquivo, nome) {
+      const ev = db.eventos.find((x) => x.id === id);
+      if (!ev || !podeEditar(ev)) negar();
+      const n = `${Date.now()}-${nome}`;
+      (anexosMem[id] ||= []).push({ path: `${id}/${n}`, nome: n, tipo: arquivo.type, tamanho: arquivo.size, criado_em: new Date().toISOString(), url: URL.createObjectURL(arquivo) });
+    },
+    async excluirAnexo(path) {
+      const id = path.split('/')[0], ev = db.eventos.find((x) => x.id === id);
+      if (ev && !podeEditar(ev)) negar();
+      anexosMem[id] = (anexosMem[id] || []).filter((a) => a.path !== path);
+    },
+    async limparAnexos(id) { delete anexosMem[id]; },
     async historico(eventoId) { return clone(eventoId ? db.historico.filter((h) => h.evento_id === eventoId) : db.historico).slice(0, 400); },
   };
 }
@@ -420,6 +460,34 @@ const S = { me: null, perfis: [], eventos: [], dirty: false, recovery: false, fi
 const root = $('#root');
 const isAdmin = () => S.me?.papel === 'admin';
 const podeEditar = (ev) => !!S.me && (isAdmin() || ev.criado_por === S.me.id);
+
+/* Aplicativo instalável (ícone na área de trabalho / tela inicial) */
+let promptInstalar = null;
+const appInstalado = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); promptInstalar = e; });
+window.addEventListener('appinstalled', () => {
+  promptInstalar = null;
+  $('#btnInstalar')?.classList.add('hidden');
+  toast('Aplicativo instalado! Procure o ícone "Dello Eventos" na área de trabalho.');
+});
+async function instalarApp() {
+  if (promptInstalar) {
+    promptInstalar.prompt();
+    const r = await promptInstalar.userChoice;
+    promptInstalar = null;
+    if (r.outcome === 'accepted') $('#btnInstalar')?.classList.add('hidden');
+    return;
+  }
+  modal({
+    title: 'Instalar o aplicativo', icon: 'monitor', cancel: false, ok: 'Entendi',
+    body: `<div class="inst-passos">
+      <p><b>Computador (Chrome ou Edge):</b> clique no ícone <b>Instalar</b> que aparece no lado direito da barra de endereço.
+        Se não aparecer: menu <b>⋮</b> → <b>Transmitir, salvar e compartilhar</b> → <b>Instalar página como app</b>.
+        No Edge: menu <b>…</b> → <b>Aplicativos</b> → <b>Instalar este site como aplicativo</b>.</p>
+      <p><b>Celular Android:</b> menu <b>⋮</b> do Chrome → <b>Adicionar à tela inicial</b> → <b>Instalar</b>.</p>
+      <p><b>iPhone:</b> no Safari, toque em <b>Compartilhar</b> → <b>Adicionar à Tela de Início</b>.</p></div>`,
+  });
+}
 const nomeDe = (id) => S.perfis.find((p) => p.id === id)?.nome || '—';
 
 async function boot() {
@@ -589,6 +657,7 @@ function renderShell() {
         <a href="#/historico" data-r="historico">${ic('clock')}Histórico</a>
         ${isAdmin() ? `<div class="grp">Administração</div><a href="#/usuarios" data-r="usuarios">${ic('users')}Usuários<span class="badge ${pend ? '' : 'hidden'}" id="pendBadge">${pend}</span></a>` : ''}
       </nav>
+      ${appInstalado() ? '' : `<button type="button" class="nav-inst" id="btnInstalar">${ic('monitor')}<span>Instalar aplicativo<small>Ícone na área de trabalho ou no celular</small></span></button>`}
       <div class="me">
         <div class="avatar">${esc(iniciais(S.me.nome))}</div>
         <div class="who"><b title="${esc(S.me.nome)}">${esc(S.me.nome)}</b><span class="small muted">${isAdmin() ? 'Administrador' : 'Usuário'}</span></div>
@@ -609,6 +678,7 @@ function renderShell() {
 
   const shell = $('#shell');
   $('#btnMenu').onclick = () => shell.classList.add('nav-open');
+  $('#btnInstalar')?.addEventListener('click', instalarApp);
   $('.scrim').onclick = () => shell.classList.remove('nav-open');
   $('#btnSair')?.addEventListener('click', async () => {
     if (!(await confirmar('Sair do sistema?', 'Você precisará entrar novamente com seu e-mail e senha.', { icon: 'logout', ok: 'Sair' }))) return;
@@ -857,7 +927,10 @@ async function viewEventos() {
 async function excluirEvento(ev, depois) {
   const ok = await confirmar(`Excluir o evento Nº ${pad(ev.numero)}?`, `"${ev.nome}" será removido para todos os usuários. A exclusão fica registrada no histórico e não pode ser desfeita.`, { danger: true, icon: 'trash', ok: 'Excluir evento' });
   if (!ok) return;
-  try { await api.deleteEvento(ev.id); toast('Evento excluído'); depois(); }
+  try {
+    try { await api.limparAnexos(ev.id); } catch { /* sem arquivos ou sem acesso ao armazenamento */ }
+    await api.deleteEvento(ev.id); toast('Evento excluído'); depois();
+  }
   catch (e) { toast(msgErro(e), 'err'); }
 }
 
@@ -942,14 +1015,134 @@ async function viewDetalhe(id) {
       <div class="card"><div class="card-h"><h3>Passagens / condução</h3></div><div style="overflow-x:auto">
         ${tabela([['Quem'], ['Meio'], ['Trecho'], ['Data'], ['Reserva'], ['Valor', 'r']], (d.passagens || []).map((p) => [esc(p.quem), esc(p.meio), esc([p.origem, p.destino].filter(Boolean).join(' → ')), fdate(p.data) + (p.hora ? ' ' + esc(p.hora) : ''), esc(p.codigo), brl(p.valor)]), st.passagens)}</div></div>
       ${d.observacoes ? `<div class="card full"><div class="card-h"><h3>Observações</h3></div><div style="white-space:pre-wrap">${esc(d.observacoes)}</div></div>` : ''}
+      <div class="card full" id="anxCard"><div class="card-h"><h3>Fotos e arquivos <span class="muted small" id="anxCount"></span></h3><span class="sp"></span>
+        <span class="small muted hidden no-print" id="anxStatus"></span>
+        ${pode ? `<label class="btn btn-sm btn-primary no-print" for="anxInput">${ic('upload')}Adicionar</label><input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">` : ''}</div>
+        <div id="anxBox"></div></div>
       <div class="card full no-print"><div class="card-h"><h3>Histórico deste evento</h3></div><div id="dHist"><div class="spinner"></div></div></div>
     </div>`;
 
   $('#dPrint').onclick = () => window.print();
+  carregarAnexos(e, pode);
+  if (pode) {
+    $('#anxInput').onchange = (x) => { enviarAnexos(e, x.target.files, pode); x.target.value = ''; };
+    const card = $('#anxCard');
+    card.addEventListener('dragover', (x) => { x.preventDefault(); card.classList.add('drag'); });
+    card.addEventListener('dragleave', (x) => { if (!card.contains(x.relatedTarget)) card.classList.remove('drag'); });
+    card.addEventListener('drop', (x) => { x.preventDefault(); card.classList.remove('drag'); enviarAnexos(e, x.dataTransfer.files, pode); });
+  }
   $('#dWa').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(textoEvento(e)), '_blank', 'noopener');
   $('#dDel')?.addEventListener('click', () => excluirEvento(e, () => { location.hash = '#/eventos'; }));
   api.historico(e.id).then((hs) => { $('#dHist') && ($('#dHist').innerHTML = hs.length ? timeline(hs, false) : '<p class="muted small" style="margin:0">Sem registros.</p>'); })
     .catch(() => { $('#dHist') && ($('#dHist').innerHTML = '<p class="muted small">Não foi possível carregar o histórico.</p>'); });
+}
+
+/* ================================================================
+   Fotos e arquivos do evento
+   ================================================================ */
+const TIPOS_ANEXO = /^(image\/(jpeg|png|webp|gif)|application\/pdf)$/;
+const MAX_ANEXO = 10 * 1024 * 1024;
+const nomeArquivo = (n) => String(n).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-').slice(-80) || 'arquivo';
+const nomeExibicao = (n) => String(n).replace(/^\d+-/, '');
+const tamanhoArq = (b) => b >= 1048576 ? (b / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+
+// Fotos grandes são reduzidas (até 2000 px, JPEG) antes do envio, para economizar espaço
+async function prepararArquivo(f) {
+  if (!/^image\/(jpeg|png|webp)$/.test(f.type) || f.size < 700 * 1024) return f;
+  try {
+    const bmp = await createImageBitmap(f);
+    const k = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.82));
+    if (!blob || blob.size >= f.size) return f;
+    return new File([blob], f.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch { return f; }
+}
+
+async function carregarAnexos(ev, pode) {
+  const box = $('#anxBox');
+  if (!box) return;
+  box.innerHTML = '<div class="spinner"></div>';
+  let lista;
+  try { lista = await api.listarAnexos(ev.id); }
+  catch (x) { box.innerHTML = `<p class="muted small" style="margin:0">Não foi possível carregar os arquivos. ${esc(msgErro(x))}</p>`; return; }
+  if (!$('#anxBox')) return;
+  $('#anxCount').textContent = lista.length ? `(${lista.length})` : '';
+  if (!lista.length) {
+    box.innerHTML = `<div class="anx-empty">${ic('image')}<div>${pode ? 'Nenhum arquivo ainda. Clique em <b>Adicionar</b> ou arraste fotos e PDFs para cá (fotos do estande, projeto, contratos…).' : 'Nenhum arquivo anexado.'}</div></div>`;
+    return;
+  }
+  const imgs = lista.filter((a) => a.tipo.startsWith('image/'));
+  box.innerHTML = `<div class="anx-grid">${lista.map((a, i) => {
+    const img = a.tipo.startsWith('image/'), nome = esc(nomeExibicao(a.nome));
+    return `<div class="anx">
+      <button type="button" class="anx-th" data-abrir="${i}" title="${nome}">${img ? `<img src="${esc(a.url)}" alt="${nome}" loading="lazy">` : `<span class="anx-doc">${ic('file')}<b>PDF</b></span>`}</button>
+      <div class="anx-inf"><span title="${nome}">${nome}</span><small>${tamanhoArq(a.tamanho)} · ${fdia(a.criado_em)}</small></div>
+      ${pode ? `<button type="button" class="btn btn-ghost icon-btn anx-del no-print" data-del-anx="${i}" title="Excluir arquivo" aria-label="Excluir arquivo">${ic('trash')}</button>` : ''}
+    </div>`;
+  }).join('')}</div>`;
+  $$('[data-abrir]', box).forEach((b) => b.addEventListener('click', () => {
+    const a = lista[+b.dataset.abrir];
+    if (a.tipo.startsWith('image/')) abrirGaleria(imgs, imgs.indexOf(a));
+    else window.open(a.url, '_blank', 'noopener');
+  }));
+  $$('[data-del-anx]', box).forEach((b) => b.addEventListener('click', async () => {
+    const a = lista[+b.dataset.delAnx];
+    if (!(await confirmar('Excluir este arquivo?', `"${nomeExibicao(a.nome)}" será removido do evento para todos.`, { danger: true, icon: 'trash', ok: 'Excluir' }))) return;
+    try { await api.excluirAnexo(a.path); toast('Arquivo excluído'); carregarAnexos(ev, pode); }
+    catch (x) { toast(msgErro(x), 'err'); }
+  }));
+}
+
+async function enviarAnexos(ev, arquivos, pode) {
+  const lista = [...(arquivos || [])];
+  if (!lista.length) return;
+  const st = $('#anxStatus');
+  let ok = 0;
+  for (let i = 0; i < lista.length; i++) {
+    const f = lista[i];
+    if (!TIPOS_ANEXO.test(f.type)) { toast(`"${f.name}": envie fotos (JPG, PNG, WEBP, GIF) ou PDF.`, 'err'); continue; }
+    st.textContent = `Enviando ${i + 1} de ${lista.length}…`;
+    st.classList.remove('hidden');
+    const pronto = await prepararArquivo(f);
+    if (pronto.size > MAX_ANEXO) { toast(`"${f.name}" passa de 10 MB.`, 'err'); continue; }
+    try { await api.enviarAnexo(ev.id, pronto, nomeArquivo(pronto.name)); ok++; }
+    catch (x) { toast(`"${f.name}": ${msgErro(x)}`, 'err'); }
+  }
+  st.classList.add('hidden');
+  if (ok) toast(ok === 1 ? 'Arquivo enviado' : `${ok} arquivos enviados`);
+  carregarAnexos(ev, pode);
+}
+
+function abrirGaleria(imgs, inicio) {
+  let i = Math.max(0, inicio);
+  const bg = document.createElement('div');
+  bg.className = 'lightbox';
+  bg.setAttribute('role', 'dialog');
+  const mover = (d) => { i = (i + d + imgs.length) % imgs.length; desenhar(); };
+  const fechar = () => { bg.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') fechar();
+    if (imgs.length > 1 && e.key === 'ArrowLeft') mover(-1);
+    if (imgs.length > 1 && e.key === 'ArrowRight') mover(1);
+  };
+  function desenhar() {
+    const a = imgs[i];
+    bg.innerHTML = `<button type="button" class="lb-x" aria-label="Fechar">${ic('x')}</button>
+      ${imgs.length > 1 ? `<button type="button" class="lb-nav lb-prev" aria-label="Anterior">${ic('chevL')}</button><button type="button" class="lb-nav lb-next" aria-label="Próxima">${ic('chevR')}</button>` : ''}
+      <figure><img src="${esc(a.url)}" alt="${esc(nomeExibicao(a.nome))}"><figcaption>${esc(nomeExibicao(a.nome))} · ${i + 1} de ${imgs.length} · <a href="${esc(a.url)}" target="_blank" rel="noopener">Abrir original</a></figcaption></figure>`;
+    $('.lb-x', bg).onclick = fechar;
+    $('.lb-prev', bg)?.addEventListener('click', () => mover(-1));
+    $('.lb-next', bg)?.addEventListener('click', () => mover(1));
+  }
+  bg.addEventListener('click', (e) => { if (e.target === bg || e.target.tagName === 'FIGURE') fechar(); });
+  document.addEventListener('keydown', onKey);
+  desenhar();
+  document.body.append(bg);
 }
 
 /* ================================================================
@@ -1094,6 +1287,7 @@ async function viewForm(id, duplicar = false) {
       <section class="card">
         ${secH(9, 'Observações', 'Informações adicionais sobre o evento')}
         <textarea id="f-obs" placeholder="Opcional" maxlength="5000">${esc(d.observacoes)}</textarea>
+        <div class="kbd-hint">${ic('image')}<span>Fotos do estande, projeto e outros arquivos são adicionados na página do evento, depois de salvar.</span></div>
       </section>
     </div>
 
