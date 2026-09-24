@@ -18,6 +18,8 @@ const TIPOS = ['Feira', 'Convenção', 'Workshop', 'Ação em cliente', 'Show ro
 const SERVICOS = ['Bancada', 'Prateleiras', 'Mesa', 'Cadeiras', 'TV'];
 const GASTOS = ['Catálogo', 'Amostras', 'Brindes', 'Camisetas', 'Banner', 'Banco', 'Base giratória', 'Suportes', 'Plataforma', 'Toalhas', 'Flores', 'Outros'];
 const MEIOS = ['Aéreo', 'Ônibus', 'Carro'];
+const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
+const OUTRO_TIPO = '__outro__';
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 const CATS = [
   ['contratos', 'Contratos'], ['servicos', 'Serviços contratados'], ['gastos', 'Gastos diversos'],
@@ -130,6 +132,18 @@ const periodo = (e) => {
   if (i && f && i !== f) return `${fdate(i)} a ${fdate(f)}`;
   return fdate(i || f) || 'Sem data';
 };
+// Tipos padrão + tipos escritos à mão que já existem nos eventos
+const tiposDe = (evs) => [...TIPOS, ...uniq((evs || []).map((e) => e.tipo)).filter((t) => t && !TIPOS.includes(t))];
+const temEntrega = (en) => !!en && ['destinatario', 'telefone', 'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'data', 'horario', 'obs'].some((k) => String(en[k] || '').trim());
+const enderecoTexto = (en = {}) => [
+  [en.rua, en.numero].filter(Boolean).join(', ') + (en.complemento ? ` — ${en.complemento}` : ''),
+  en.bairro, [en.cidade, en.uf].filter(Boolean).join('/'), en.cep && 'CEP ' + en.cep,
+].filter((x) => String(x || '').trim()).join(' · ');
+const enderecoMapa = (en = {}) => [[en.rua, en.numero].filter(Boolean).join(', '), en.bairro, [en.cidade, en.uf].filter(Boolean).join(' - '), en.cep].filter((x) => String(x || '').trim()).join(', ');
+const entregaTexto = (en = {}) => [
+  enderecoTexto(en), en.destinatario && 'Recebe: ' + en.destinatario + (en.telefone ? ' (' + en.telefone + ')' : ''),
+  (en.data || en.horario) && 'Entrega: ' + [fdate(en.data), en.horario].filter(Boolean).join(' '), en.obs,
+].filter(Boolean).join(' · ');
 const pill = (s) => SIT[s] ? `<span class="pill ${SIT[s].cor}">${SIT[s].label}</span>` : '';
 const soma = (arr, f = (x) => x) => arr.reduce((t, x) => t + (Number(f(x)) || 0), 0);
 const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -161,7 +175,7 @@ function sanear(ev) {
   const arr = (x) => Array.isArray(x) ? x.filter((i) => i && typeof i === 'object' && !Array.isArray(i)) : [];
   const d = obj(ev.dados);
   ev.dados = {
-    ...d, contratoEvento: obj(d.contratoEvento), montadora: obj(d.montadora),
+    ...d, contratoEvento: obj(d.contratoEvento), montadora: obj(d.montadora), entrega: obj(d.entrega),
     servicos: arr(d.servicos), gastos: arr(d.gastos), hospedagem: arr(d.hospedagem),
     alimentacao: arr(d.alimentacao), passagens: arr(d.passagens),
     envolvidos: Array.isArray(d.envolvidos) ? d.envolvidos.filter((x) => typeof x === 'string') : [],
@@ -803,7 +817,7 @@ async function viewPainel() {
     const maxM = Math.max(...meses, 1);
     const mesAtual = ano === hoje.slice(0, 4) ? +hoje.slice(5, 7) - 1 : -1;
 
-    const porTipo = TIPOS.map((t) => { const l = doAno.filter((e) => e.tipo === t && e.situacao !== 'reprovado'); return [t, soma(l, (e) => e.valor_total), l.length]; })
+    const porTipo = tiposDe(doAno).map((t) => { const l = doAno.filter((e) => e.tipo === t && e.situacao !== 'reprovado'); return [t, soma(l, (e) => e.valor_total), l.length]; })
       .filter((x) => x[2]).sort((a, b) => b[1] - a[1]);
     const maxT = Math.max(...porTipo.map((x) => x[1]), 1);
     const nSit = doAno.length || 1;
@@ -874,7 +888,7 @@ async function viewEventos() {
   view().innerHTML = `<div class="card">
     <div class="filters">
       <div class="search input-icon">${ic('search')}<input id="fq" type="search" placeholder="Buscar por nome, local, gerente ou número" value="${esc(F.q)}"></div>
-      <select id="ftipo" aria-label="Tipo"><option value="">Todos os tipos</option>${TIPOS.map((t) => `<option ${F.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <select id="ftipo" aria-label="Tipo"><option value="">Todos os tipos</option>${tiposDe(evs).map((t) => `<option ${F.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
       <select id="fger" aria-label="Gerente"><option value="">Todos os gerentes</option>${gerentes.map((g) => `<option ${F.gerente === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
       <label class="toggle"><input type="checkbox" id="fmeus" ${F.meus ? 'checked' : ''}><span class="sw"></span>Só os meus</label>
     </div>
@@ -952,6 +966,7 @@ function linhasEvento(e) {
 
 function textoEvento(e) {
   return `*Nº ${pad(e.numero)} — ${e.nome}*\n${SIT[e.situacao]?.label} · ${e.tipo}\n${periodo(e)}${e.local ? ' · ' + e.local : ''}\nGerente: ${e.gerente || '—'}\n` +
+    (temEntrega(e.dados?.entrega) ? `Entrega: ${entregaTexto(e.dados.entrega)}\n` : '') +
     linhasEvento(e).map(([g, d, v]) => `• ${g}${d ? ': ' + d : ''} — ${brl(v)}`).join('\n') + `\n*Total: ${brl(e.valor_total)}*`;
 }
 
@@ -996,6 +1011,15 @@ async function viewDetalhe(id) {
     <div class="det-grid">
       <div class="card"><div class="card-h"><h3>Composição do investimento</h3></div>
         <div class="hbars">${CATS.map(([k, l]) => `<div class="hbar"><div class="top"><b>${l}</b><span>${brl(st[k])}</span></div><div class="track"><div class="fill" style="width:${(st[k] / maxC) * 100}%"></div></div></div>`).join('')}</div></div>
+      <div class="card full"><div class="card-h"><h3>Endereço de entrega</h3><span class="sp"></span>
+        ${temEntrega(d.entrega) && enderecoMapa(d.entrega) ? `<a class="btn btn-sm no-print" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(enderecoMapa(d.entrega))}" target="_blank" rel="noopener">${ic('pin')}Abrir no mapa</a>` : ''}
+        ${temEntrega(d.entrega) ? `<button type="button" class="btn btn-sm no-print" id="enCopiar">${ic('copy')}Copiar</button>` : ''}</div>
+        ${temEntrega(d.entrega) ? `<div class="grid g4">
+          <div class="span2"><div class="lbl">Endereço</div>${esc(enderecoTexto(d.entrega)) || '—'}</div>
+          <div><div class="lbl">Quem recebe</div>${esc(d.entrega.destinatario || '—')}${d.entrega.telefone ? `<div class="small muted">${esc(d.entrega.telefone)}</div>` : ''}</div>
+          <div><div class="lbl">Entrega</div>${fdate(d.entrega.data) || '—'}${d.entrega.horario ? `<div class="small muted">${esc(d.entrega.horario)}</div>` : ''}</div>
+          ${d.entrega.obs ? `<div class="span-all"><div class="lbl">Observações</div>${esc(d.entrega.obs)}</div>` : ''}
+        </div>` : '<p class="muted small" style="margin:0">Nenhum endereço de entrega informado.</p>'}</div>
       <div class="card"><div class="card-h"><h3>Contratos</h3><span class="sp"></span><b class="num">${brl(st.contratos)}</b></div>
         <div class="sub-h" style="margin-top:0">Contrato sobre o evento</div>
         <div class="grid g3"><div><div class="lbl">Aprovação</div>${fdate(ce.data) || '—'}</div><div><div class="lbl">Área</div>${ce.area ? esc(String(ce.area).replace('.', ',')) + ' m²' : '—'}</div><div><div class="lbl">Valor</div>${brl(ce.valor)}</div></div>
@@ -1023,6 +1047,10 @@ async function viewDetalhe(id) {
     </div>`;
 
   $('#dPrint').onclick = () => window.print();
+  $('#enCopiar')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(entregaTexto(d.entrega)); toast('Endereço copiado'); }
+    catch { toast('Não foi possível copiar', 'err'); }
+  });
   carregarAnexos(e, pode);
   if (pode) {
     $('#anxInput').onchange = (x) => { enviarAnexos(e, x.target.files, pode); x.target.value = ''; };
@@ -1172,6 +1200,7 @@ function normalizarDados(d = {}) {
   return {
     contratoEvento: { data: '', area: '', valor: '', ...(d.contratoEvento || {}) },
     montadora: { data: '', nome: '', valor: '', ...(d.montadora || {}) },
+    entrega: { destinatario: '', telefone: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '', ...(d.entrega || {}) },
     servicos: fx(SERVICOS, d.servicos), gastos: fx(GASTOS, d.gastos),
     envolvidos: [...(d.envolvidos || [])], hospedagem: [...(d.hospedagem || [])],
     alimentacao: [...(d.alimentacao || [])], passagens: [...(d.passagens || [])],
@@ -1241,7 +1270,9 @@ async function viewForm(id, duplicar = false) {
         <div class="seg" id="seg" style="margin-bottom:18px">${SIT_ORDEM.map((s) => `<label class="${SIT[s].cor} ${ev.situacao === s ? 'on' : ''}"><input type="radio" name="sit" value="${s}" ${ev.situacao === s ? 'checked' : ''}><span class="d"></span><span><b>${SIT[s].label}</b><small>${SIT[s].cx}</small></span></label>`).join('')}</div>
         <div class="grid g3">
           <div class="field span2"><label for="f-nome">Nome do evento <span class="req">*</span></label><input id="f-nome" value="${esc(ev.nome)}" placeholder="Ex.: Feira Escolar 2027" maxlength="160"></div>
-          <div class="field"><label for="f-tipo">Tipo de evento</label><select id="f-tipo">${TIPOS.map((t) => `<option ${ev.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}${TIPOS.includes(ev.tipo) ? '' : `<option selected>${esc(ev.tipo)}</option>`}</select></div>
+          <div class="field"><label for="f-tipo">Tipo de evento</label>
+            <select id="f-tipo">${tiposDe([...S.eventos, ev]).map((t) => `<option ${ev.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="${OUTRO_TIPO}">Outro (escrever)…</option></select>
+            <input id="f-tipo-outro" class="hidden" style="margin-top:8px" maxlength="60" placeholder="Escreva o tipo do evento" list="dl-tipos"></div>
           <div class="field"><label for="f-inicio">Data de início</label><input id="f-inicio" type="date" value="${esc(ev.data_inicio || '')}"></div>
           <div class="field"><label for="f-fim">Data de término</label><input id="f-fim" type="date" value="${esc(ev.data_fim || '')}"></div>
           <div class="field"><label for="f-gerente">Gerente responsável</label><input id="f-gerente" list="dl-ger" value="${esc(ev.gerente)}" placeholder="Nome do gerente" maxlength="150"></div>
@@ -1250,7 +1281,25 @@ async function viewForm(id, duplicar = false) {
       </section>
 
       <section class="card">
-        ${secH(2, 'Contratos', 'Contrato do espaço e da montadora do estande', 'contratos')}
+        ${secH(2, 'Endereço de entrega', 'Para onde enviar produtos, amostras e materiais do evento')}
+        <div class="grid g4">
+          <div class="field span2"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
+          <div class="field"><label for="f-en-tel">Telefone</label><input id="f-en-tel" type="tel" value="${esc(d.entrega.telefone)}" maxlength="40" placeholder="(00) 00000-0000"></div>
+          <div class="field"><label for="f-en-cep">CEP</label><input id="f-en-cep" inputmode="numeric" value="${esc(d.entrega.cep)}" maxlength="9" placeholder="00000-000"><div class="hint" id="cepMsg">Preenche o endereço sozinho</div></div>
+          <div class="field span2"><label for="f-en-rua">Endereço</label><input id="f-en-rua" value="${esc(d.entrega.rua)}" maxlength="200" placeholder="Rua, avenida…"></div>
+          <div class="field"><label for="f-en-num">Número</label><input id="f-en-num" value="${esc(d.entrega.numero)}" maxlength="20"></div>
+          <div class="field"><label for="f-en-comp">Complemento</label><input id="f-en-comp" value="${esc(d.entrega.complemento)}" maxlength="120" placeholder="Pavilhão, estande, sala…"></div>
+          <div class="field"><label for="f-en-bairro">Bairro</label><input id="f-en-bairro" value="${esc(d.entrega.bairro)}" maxlength="100"></div>
+          <div class="field"><label for="f-en-cidade">Cidade</label><input id="f-en-cidade" value="${esc(d.entrega.cidade)}" maxlength="100"></div>
+          <div class="field"><label for="f-en-uf">UF</label><select id="f-en-uf"><option value=""></option>${UFS.map((u) => `<option ${d.entrega.uf === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+          <div class="field"><label for="f-en-data">Data de entrega</label><input id="f-en-data" type="date" value="${esc(d.entrega.data)}"></div>
+          <div class="field"><label for="f-en-hora">Horário de recebimento</label><input id="f-en-hora" value="${esc(d.entrega.horario)}" maxlength="60" placeholder="Ex.: 8h às 17h"></div>
+          <div class="field span3"><label for="f-en-obs">Observações da entrega</label><input id="f-en-obs" value="${esc(d.entrega.obs)}" maxlength="300" placeholder="Doca, portão de carga, agendamento, nota fiscal…"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        ${secH(3, 'Contratos', 'Contrato do espaço e da montadora do estande', 'contratos')}
         <div class="sub-h" style="margin-top:0">Contrato sobre o evento</div>
         <div class="grid g3">
           <div class="field"><label for="f-ce-data">Data de aprovação</label><input id="f-ce-data" type="date" value="${esc(d.contratoEvento.data)}"></div>
@@ -1266,44 +1315,44 @@ async function viewForm(id, duplicar = false) {
       </section>
 
       <section class="card">
-        ${secH(3, 'Serviços contratados', 'Mobiliário e equipamentos do estande', 'servicos')}
+        ${secH(4, 'Serviços contratados', 'Mobiliário e equipamentos do estande', 'servicos')}
         <table class="items" id="it-servicos"><thead><tr><th>Item</th><th>Qtde</th><th>Valor</th><th></th></tr></thead><tbody>${d.servicos.map((s) => itemHtml('servicos', s)).join('')}</tbody></table>
         <button type="button" class="btn add-row btn-sm" data-add-item="servicos">${ic('plus')}Outro serviço</button>
       </section>
 
       <section class="card">
-        ${secH(4, 'Gastos diversos', 'Materiais, brindes e itens de apoio', 'gastos')}
+        ${secH(5, 'Gastos diversos', 'Materiais, brindes e itens de apoio', 'gastos')}
         <table class="items" id="it-gastos"><thead><tr><th>Item</th><th>Qtde</th><th>Valor</th><th class="o">Observação</th><th></th></tr></thead><tbody>${d.gastos.map((g) => itemHtml('gastos', g)).join('')}</tbody></table>
         <button type="button" class="btn add-row btn-sm" data-add-item="gastos">${ic('plus')}Outro gasto</button>
       </section>
 
       <section class="card">
-        ${secH(5, 'Envolvidos', 'Pessoas que participam do evento. Os nomes viram sugestão em hospedagem e passagens.')}
+        ${secH(6, 'Envolvidos', 'Pessoas que participam do evento. Os nomes viram sugestão em hospedagem e passagens.')}
         ${reps('envolvidos', d.envolvidos)}
       </section>
 
       <section class="card">
-        ${secH(6, 'Hospedagem', 'Uma linha por hóspede', 'hospedagem')}
+        ${secH(7, 'Hospedagem', 'Uma linha por hóspede', 'hospedagem')}
         ${reps('hospedagem', d.hospedagem)}${hintEnter}
       </section>
 
       <section class="card">
-        ${secH(7, 'Alimentação', '', 'alimentacao')}
+        ${secH(8, 'Alimentação', '', 'alimentacao')}
         ${reps('alimentacao', d.alimentacao)}
       </section>
 
       <section class="card">
-        ${secH(8, 'Passagem / condução', 'Uma linha por pessoa e trecho', 'passagens')}
+        ${secH(9, 'Passagem / condução', 'Uma linha por pessoa e trecho', 'passagens')}
         ${reps('passagens', d.passagens)}
       </section>
 
       <section class="card">
-        ${secH(9, 'Observações', 'Informações adicionais sobre o evento')}
+        ${secH(10, 'Observações', 'Informações adicionais sobre o evento')}
         <textarea id="f-obs" placeholder="Opcional" maxlength="5000">${esc(d.observacoes)}</textarea>
       </section>
 
       <section class="card" id="anxCard">
-        ${secH(10, 'Fotos e arquivos', 'Fotos do estande, projeto, contratos… JPG, PNG, WEBP, GIF ou PDF, até 10 MB')}
+        ${secH(11, 'Fotos e arquivos', 'Fotos do estande, projeto, contratos… JPG, PNG, WEBP, GIF ou PDF, até 10 MB')}
         ${novo ? '' : `<div class="sub-h" style="margin-top:0">Já anexados <span class="muted small" id="anxCount"></span></div><div id="anxBox"></div><div class="sub-h">Adicionar novos</div>`}
         <div id="anxPend"></div>
         <label class="btn add-row" for="anxInput" style="margin-top:0">${ic('upload')}Escolher fotos ou arquivos</label>
@@ -1326,6 +1375,7 @@ async function viewForm(id, duplicar = false) {
   <div class="savebar"><div class="t"><span>Total</span><b id="sb-tot"></b></div><button class="btn btn-primary" type="submit">${ic('save')}Salvar</button></div>
   <datalist id="dl-env"></datalist>
   <datalist id="dl-ger">${sugGerentes.map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
+  <datalist id="dl-tipos">${tiposDe(S.eventos).filter((t) => !TIPOS.includes(t)).map((t) => `<option value="${esc(t)}">`).join('')}</datalist>
   <datalist id="dl-loc">${sugLocais.map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
   </form>`;
 
@@ -1347,11 +1397,16 @@ async function viewForm(id, duplicar = false) {
     });
     const area = v('ce-area');
     return {
-      situacao: $('input[name=sit]:checked', frm)?.value || 'analise', tipo: v('tipo'), nome: v('nome'), local: v('local'), gerente: v('gerente'),
+      situacao: $('input[name=sit]:checked', frm)?.value || 'analise', tipo: v('tipo') === OUTRO_TIPO ? v('tipo-outro') : v('tipo'), nome: v('nome'), local: v('local'), gerente: v('gerente'),
       data_inicio: v('inicio'), data_fim: v('fim'),
       dados: {
         contratoEvento: { data: v('ce-data'), area: area ? parseMoney(area) : '', valor: parseMoney(v('ce-valor')) },
         montadora: { data: v('mo-data'), nome: v('mo-nome'), valor: parseMoney(v('mo-valor')) },
+        entrega: {
+          destinatario: v('en-dest'), telefone: v('en-tel'), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
+          complemento: v('en-comp'), bairro: v('en-bairro'), cidade: v('en-cidade'), uf: v('en-uf'),
+          data: v('en-data'), horario: v('en-hora'), obs: v('en-obs'),
+        },
         servicos: itens('servicos'), gastos: itens('gastos'),
         envolvidos: linhas('envolvidos').map((r) => r.nome), hospedagem: linhas('hospedagem'),
         alimentacao: linhas('alimentacao'), passagens: linhas('passagens'), observacoes: $('#f-obs').value.trim(),
@@ -1421,6 +1476,40 @@ async function viewForm(id, duplicar = false) {
   cardAnx.addEventListener('drop', (x) => { x.preventDefault(); cardAnx.classList.remove('drag'); adicionarPend([...x.dataTransfer.files]); });
   if (!novo) carregarAnexos(ev, true);
 
+  const selTipo = $('#f-tipo'), outroTipo = $('#f-tipo-outro');
+  selTipo.addEventListener('change', () => {
+    const outro = selTipo.value === OUTRO_TIPO;
+    outroTipo.classList.toggle('hidden', !outro);
+    if (outro) outroTipo.focus();
+  });
+
+  // CEP → endereço (ViaCEP, gratuito)
+  const cep = $('#f-en-cep'), cepMsg = $('#cepMsg');
+  let ultimoCep = cep.value.replace(/\D/g, '');
+  const buscarCep = async () => {
+    const dig = cep.value.replace(/\D/g, '');
+    if (dig.length === 8) cep.value = dig.slice(0, 5) + '-' + dig.slice(5);
+    if (dig.length !== 8 || dig === ultimoCep) return;
+    ultimoCep = dig;
+    cepMsg.textContent = 'Buscando endereço…';
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 6000);
+      const r = await fetch(`https://viacep.com.br/ws/${dig}/json/`, { signal: ctl.signal }).then((x) => x.json());
+      clearTimeout(t);
+      if (r.erro) { cepMsg.textContent = 'CEP não encontrado. Preencha à mão.'; return; }
+      const por = (id, val) => { if (val) $('#f-' + id).value = String(val).slice(0, 200); };
+      por('en-rua', r.logradouro); por('en-bairro', r.bairro); por('en-cidade', r.localidade);
+      if (UFS.includes(r.uf)) $('#f-en-uf').value = r.uf;
+      cepMsg.textContent = 'Endereço encontrado. Confira e informe o número.';
+      S.dirty = true;
+      atualizar();
+      $('#f-en-num').focus();
+    } catch { cepMsg.textContent = 'Não foi possível buscar o CEP agora. Preencha à mão.'; }
+  };
+  cep.addEventListener('input', () => { if (cep.value.replace(/\D/g, '').length === 8) buscarCep(); });
+  cep.addEventListener('blur', buscarCep);
+
   frm.addEventListener('click', (e) => {
     const a = e.target.closest('[data-add]');
     if (a) { addRep(a.dataset.add); S.dirty = true; return; }
@@ -1475,6 +1564,7 @@ async function viewForm(id, duplicar = false) {
     const f = ler();
     const erro = (id, msg) => { const el = $('#f-' + id); el.classList.add('invalid'); el.focus(); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); toast(msg, 'err'); };
     if (!f.nome) return erro('nome', 'Informe o nome do evento.');
+    if (!f.tipo) return erro('tipo-outro', 'Escreva o tipo do evento.');
     if (f.data_inicio && f.data_fim && f.data_fim < f.data_inicio) return erro('fim', 'A data de término é anterior à data de início.');
     if (f.dados.hospedagem.some((h) => h.chegada && h.saida && h.saida < h.chegada)) { toast('Há hospedagem com saída antes da chegada.', 'err'); return; }
 
@@ -1538,7 +1628,7 @@ async function viewRelatorios() {
     if (R.por === 'situacao') p.innerHTML = sel('Situação', SIT_ORDEM.map((s) => [s, SIT[s].label]), 'Todas as situações');
     if (R.por === 'evento') p.innerHTML = sel('Evento', evs.map((e) => [e.id, `Nº ${pad(e.numero)} — ${e.nome}`]));
     if (R.por === 'gerente') p.innerHTML = sel('Gerente', gerentes.map((g) => [g, g]), 'Todos os gerentes');
-    if (R.por === 'tipo') p.innerHTML = sel('Tipo', TIPOS.map((t) => [t, t]), 'Todos os tipos');
+    if (R.por === 'tipo') p.innerHTML = sel('Tipo', tiposDe(evs).map((t) => [t, t]), 'Todos os tipos');
     if (R.por === 'periodo') p.innerHTML = `<div class="grid g2"><div class="field"><label>De</label><input type="date" id="rDe" value="${R.de}"></div><div class="field"><label>Até</label><input type="date" id="rAte" value="${R.ate}"></div></div>`;
   };
   $('#rPor').onchange = (e) => { R.por = e.target.value; R.val = ''; param(); };
@@ -1577,6 +1667,7 @@ async function viewRelatorios() {
       <tfoot><tr><td colspan="6">${l.length} evento(s)</td><td class="r">${brl(soma(l, (e) => e.valor_total))}</td></tr></tfoot></table></div>`;
     const detalhe = (e) => `<div class="rep-ev"><div class="h"><span class="seq">Nº ${pad(e.numero)}</span><b>${esc(e.nome)}</b>${pill(e.situacao)}<span class="sp"></span><span class="v">${brl(e.valor_total)}</span></div>
       <div class="i">${esc(e.tipo)} · ${periodo(e)} · ${esc(e.local || 'Local a definir')} · Gerente: ${esc(e.gerente || '—')}${(e.dados?.envolvidos || []).length ? ' · Envolvidos: ' + e.dados.envolvidos.map(esc).join(', ') : ''}</div>
+      ${temEntrega(e.dados?.entrega) ? `<div class="i"><b>Entrega:</b> ${esc(entregaTexto(e.dados.entrega))}</div>` : ''}
       ${linhasEvento(e).length ? `<table class="mini"><tbody>${linhasEvento(e).map(([g, d, v]) => `<tr><td style="width:150px"><b>${g}</b></td><td>${esc(d)}</td><td class="r">${brl(v)}</td></tr>`).join('')}</tbody></table>` : '<div class="small muted">Nenhum item lançado.</div>'}</div>`;
 
     $('#rOut').innerHTML = `<div class="card report">
@@ -1609,11 +1700,12 @@ async function viewRelatorios() {
 function exportarCsv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
   const q = (s) => { let t = String(s ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
-  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Local', 'Gerente', 'Início', 'Término', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por'];
+  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Local', 'Gerente', 'Início', 'Término', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega'];
   const linhas = lista.map((e) => {
     const st = subtotais(e.dados);
     return [pad(e.numero), SIT[e.situacao]?.label, e.tipo, e.nome, e.local, e.gerente, fdate(e.data_inicio), fdate(e.data_fim),
-      n(st.contratos), n(st.servicos), n(st.gastos), n(st.hospedagem), n(st.alimentacao), n(st.passagens), n(e.valor_total), nomeDe(e.criado_por)].map(q).join(';');
+      n(st.contratos), n(st.servicos), n(st.gastos), n(st.hospedagem), n(st.alimentacao), n(st.passagens), n(e.valor_total), nomeDe(e.criado_por),
+      enderecoTexto(e.dados?.entrega || {}), e.dados?.entrega?.destinatario || '', fdate(e.dados?.entrega?.data)].map(q).join(';');
   });
   const blob = new Blob(['﻿' + [cab.map(q).join(';'), ...linhas].join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
