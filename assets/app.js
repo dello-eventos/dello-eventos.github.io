@@ -1098,21 +1098,34 @@ async function carregarAnexos(ev, pode) {
   }));
 }
 
+// Fotos (JPG/PNG/WEBP) até 50 MB são aceitas porque serão reduzidas; o resto precisa ter até 10 MB
+function validarArquivo(f) {
+  if (!TIPOS_ANEXO.test(f.type)) return `"${f.name}": envie fotos (JPG, PNG, WEBP, GIF) ou PDF.`;
+  const reduz = /^image\/(jpeg|png|webp)$/.test(f.type);
+  if (f.size > (reduz ? 50 : 10) * 1024 * 1024) return `"${f.name}" é grande demais (máximo 10 MB).`;
+  return '';
+}
+
+async function subirArquivos(evId, arquivos, progresso) {
+  let ok = 0;
+  for (let i = 0; i < arquivos.length; i++) {
+    const f = arquivos[i];
+    const erro = validarArquivo(f);
+    if (erro) { toast(erro, 'err'); continue; }
+    progresso?.(i + 1, arquivos.length);
+    const pronto = await prepararArquivo(f);
+    if (pronto.size > MAX_ANEXO) { toast(`"${f.name}" passa de 10 MB mesmo depois de reduzido.`, 'err'); continue; }
+    try { await api.enviarAnexo(evId, pronto, nomeArquivo(pronto.name)); ok++; }
+    catch (x) { toast(`"${f.name}": ${msgErro(x)}`, 'err'); }
+  }
+  return ok;
+}
+
 async function enviarAnexos(ev, arquivos, pode) {
   const lista = [...(arquivos || [])];
   if (!lista.length) return;
   const st = $('#anxStatus');
-  let ok = 0;
-  for (let i = 0; i < lista.length; i++) {
-    const f = lista[i];
-    if (!TIPOS_ANEXO.test(f.type)) { toast(`"${f.name}": envie fotos (JPG, PNG, WEBP, GIF) ou PDF.`, 'err'); continue; }
-    st.textContent = `Enviando ${i + 1} de ${lista.length}…`;
-    st.classList.remove('hidden');
-    const pronto = await prepararArquivo(f);
-    if (pronto.size > MAX_ANEXO) { toast(`"${f.name}" passa de 10 MB.`, 'err'); continue; }
-    try { await api.enviarAnexo(ev.id, pronto, nomeArquivo(pronto.name)); ok++; }
-    catch (x) { toast(`"${f.name}": ${msgErro(x)}`, 'err'); }
-  }
+  const ok = await subirArquivos(ev.id, lista, (i, n) => { st.textContent = `Enviando ${i} de ${n}…`; st.classList.remove('hidden'); });
   st.classList.add('hidden');
   if (ok) toast(ok === 1 ? 'Arquivo enviado' : `${ok} arquivos enviados`);
   carregarAnexos(ev, pode);
@@ -1287,7 +1300,15 @@ async function viewForm(id, duplicar = false) {
       <section class="card">
         ${secH(9, 'Observações', 'Informações adicionais sobre o evento')}
         <textarea id="f-obs" placeholder="Opcional" maxlength="5000">${esc(d.observacoes)}</textarea>
-        <div class="kbd-hint">${ic('image')}<span>Fotos do estande, projeto e outros arquivos são adicionados na página do evento, depois de salvar.</span></div>
+      </section>
+
+      <section class="card" id="anxCard">
+        ${secH(10, 'Fotos e arquivos', 'Fotos do estande, projeto, contratos… JPG, PNG, WEBP, GIF ou PDF, até 10 MB')}
+        ${novo ? '' : `<div class="sub-h" style="margin-top:0">Já anexados <span class="muted small" id="anxCount"></span></div><div id="anxBox"></div><div class="sub-h">Adicionar novos</div>`}
+        <div id="anxPend"></div>
+        <label class="btn add-row" for="anxInput" style="margin-top:0">${ic('upload')}Escolher fotos ou arquivos</label>
+        <input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">
+        <div class="kbd-hint">${ic('info')}<span>Os arquivos escolhidos são enviados quando você clicar em <b>Salvar</b>. No computador, também dá para arrastar para cá.</span></div>
       </section>
     </div>
 
@@ -1370,6 +1391,36 @@ async function viewForm(id, duplicar = false) {
     const t = e.target;
     if (t.classList.contains('money') && t.value.trim()) t.value = fmtNum(parseMoney(t.value));
   });
+  const pendentes = [];
+  const desenharPend = () => {
+    $('#anxPend').innerHTML = pendentes.length ? `<div class="anx-grid" style="margin-bottom:12px">${pendentes.map((p, i) => `<div class="anx pend">
+      <div class="anx-th">${p.url ? `<img src="${esc(p.url)}" alt="">` : `<span class="anx-doc">${ic('file')}<b>PDF</b></span>`}</div>
+      <div class="anx-inf"><span title="${esc(p.f.name)}">${esc(p.f.name)}</span><small>${tamanhoArq(p.f.size)} · enviado ao salvar</small></div>
+      <button type="button" class="btn btn-ghost icon-btn anx-del" data-rm-pend="${i}" title="Remover" aria-label="Remover">${ic('x')}</button></div>`).join('')}</div>` : '';
+  };
+  const adicionarPend = (arquivos) => {
+    for (const f of arquivos) {
+      const erro = validarArquivo(f);
+      if (erro) { toast(erro, 'err'); continue; }
+      pendentes.push({ f, url: f.type.startsWith('image/') ? URL.createObjectURL(f) : '' });
+    }
+    S.dirty = true;
+    desenharPend();
+  };
+  $('#anxInput').addEventListener('change', (x) => { adicionarPend([...x.target.files]); x.target.value = ''; });
+  $('#anxPend').addEventListener('click', (x) => {
+    const b = x.target.closest('[data-rm-pend]');
+    if (!b) return;
+    const [p] = pendentes.splice(+b.dataset.rmPend, 1);
+    if (p?.url) URL.revokeObjectURL(p.url);
+    desenharPend();
+  });
+  const cardAnx = $('#anxCard');
+  cardAnx.addEventListener('dragover', (x) => { x.preventDefault(); cardAnx.classList.add('drag'); });
+  cardAnx.addEventListener('dragleave', (x) => { if (!cardAnx.contains(x.relatedTarget)) cardAnx.classList.remove('drag'); });
+  cardAnx.addEventListener('drop', (x) => { x.preventDefault(); cardAnx.classList.remove('drag'); adicionarPend([...x.dataTransfer.files]); });
+  if (!novo) carregarAnexos(ev, true);
+
   frm.addEventListener('click', (e) => {
     const a = e.target.closest('[data-add]');
     if (a) { addRep(a.dataset.add); S.dirty = true; return; }
@@ -1442,7 +1493,16 @@ async function viewForm(id, duplicar = false) {
       const salvo = await api.saveEvento({ ...f, id: ev.id });
       S.dirty = false;
       S.eventos = [];
-      toast(novo ? `Evento Nº ${pad(salvo.numero)} cadastrado` : 'Alterações salvas');
+      let enviados = 0;
+      if (pendentes.length) {
+        ev.id = salvo.id;  // se algo falhar depois daqui, um novo Salvar atualiza em vez de duplicar
+        enviados = await subirArquivos(salvo.id, pendentes.map((p) => p.f), (i, n) => {
+          btns.forEach((b) => { b.innerHTML = `${ic('upload')}Enviando ${i} de ${n}…`; });
+        });
+        pendentes.forEach((p) => p.url && URL.revokeObjectURL(p.url));
+      }
+      const extra = enviados ? ` com ${enviados} arquivo${enviados > 1 ? 's' : ''}` : '';
+      toast(novo ? `Evento Nº ${pad(salvo.numero)} cadastrado${extra}` : `Alterações salvas${extra}`);
       location.hash = '#/eventos/' + salvo.id;
     } catch (x) {
       toast(msgErro(x), 'err');

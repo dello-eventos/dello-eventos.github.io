@@ -48,7 +48,7 @@ Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rod
   - total somado na hora.
 - **Tecla Enter:** avança de campo em campo, abre uma nova linha no fim de uma linha preenchida e, numa linha vazia, pula para a próxima seção.
 - **Duplicar evento:** útil para feiras que se repetem.
-- **Fotos e arquivos:** na página do evento, envie fotos do estande, projeto, contratos (JPG, PNG, WEBP, GIF ou PDF, até 10 MB). Fotos grandes são reduzidas automaticamente. Todos os aprovados veem; só quem criou o evento ou um admin envia e exclui. Espaço grátis: 1 GB.
+- **Fotos e arquivos:** no próprio cadastro (enviados ao salvar) ou depois, na página do evento. Envie fotos do estande, projeto, contratos (JPG, PNG, WEBP, GIF ou PDF, até 10 MB). Fotos grandes são reduzidas automaticamente. Todos os aprovados veem; só quem criou o evento ou um admin envia e exclui. Espaço grátis: 1 GB.
 - **Aplicativo:** botão **Instalar aplicativo** no menu cria um ícone na área de trabalho (Chrome/Edge) ou na tela inicial do celular.
 - **Relatórios:**
   - por situação, evento, gerente, tipo ou período;
