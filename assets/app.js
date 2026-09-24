@@ -134,6 +134,8 @@ const periodo = (e) => {
 };
 // Tipos padrão + tipos escritos à mão que já existem nos eventos
 const tiposDe = (evs) => [...TIPOS, ...uniq((evs || []).map((e) => e.tipo)).filter((t) => t && !TIPOS.includes(t))];
+const clienteTexto = (c = {}) => [c.codigo && 'Cód. ' + c.codigo, c.nome].filter((x) => String(x || '').trim()).join(' · ');
+const clienteDe = (e) => e?.dados?.cliente || {};
 const temEntrega = (en) => !!en && ['destinatario', 'telefone', 'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'data', 'horario', 'obs'].some((k) => String(en[k] || '').trim());
 const enderecoTexto = (en = {}) => [
   [en.rua, en.numero].filter(Boolean).join(', ') + (en.complemento ? ` — ${en.complemento}` : ''),
@@ -175,7 +177,7 @@ function sanear(ev) {
   const arr = (x) => Array.isArray(x) ? x.filter((i) => i && typeof i === 'object' && !Array.isArray(i)) : [];
   const d = obj(ev.dados);
   ev.dados = {
-    ...d, contratoEvento: obj(d.contratoEvento), montadora: obj(d.montadora), entrega: obj(d.entrega),
+    ...d, contratoEvento: obj(d.contratoEvento), montadora: obj(d.montadora), entrega: obj(d.entrega), cliente: obj(d.cliente),
     servicos: arr(d.servicos), gastos: arr(d.gastos), hospedagem: arr(d.hospedagem),
     alimentacao: arr(d.alimentacao), passagens: arr(d.passagens),
     envolvidos: Array.isArray(d.envolvidos) ? d.envolvidos.filter((x) => typeof x === 'string') : [],
@@ -887,7 +889,7 @@ async function viewEventos() {
 
   view().innerHTML = `<div class="card">
     <div class="filters">
-      <div class="search input-icon">${ic('search')}<input id="fq" type="search" placeholder="Buscar por nome, local, gerente ou número" value="${esc(F.q)}"></div>
+      <div class="search input-icon">${ic('search')}<input id="fq" type="search" placeholder="Buscar por evento, cliente, local, gerente ou número" value="${esc(F.q)}"></div>
       <select id="ftipo" aria-label="Tipo"><option value="">Todos os tipos</option>${tiposDe(evs).map((t) => `<option ${F.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
       <select id="fger" aria-label="Gerente"><option value="">Todos os gerentes</option>${gerentes.map((g) => `<option ${F.gerente === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
       <label class="toggle"><input type="checkbox" id="fmeus" ${F.meus ? 'checked' : ''}><span class="sw"></span>Só os meus</label>
@@ -899,7 +901,7 @@ async function viewEventos() {
   const desenhar = () => {
     const q = F.q.trim().toLowerCase();
     const base = evs.filter((e) => (!F.tipo || e.tipo === F.tipo) && (!F.gerente || e.gerente === F.gerente) && (!F.meus || e.criado_por === S.me.id)
-      && (!q || [e.nome, e.local, e.gerente, pad(e.numero), String(e.numero), e.tipo].some((x) => String(x || '').toLowerCase().includes(q))));
+      && (!q || [e.nome, e.local, e.gerente, pad(e.numero), String(e.numero), e.tipo, clienteDe(e).codigo, clienteDe(e).nome].some((x) => String(x || '').toLowerCase().includes(q))));
     const lista = base.filter((e) => !F.sit || e.situacao === F.sit);
     $('#fsit').innerHTML = [['', 'Todos', null], ...SIT_ORDEM.map((s) => [s, SIT[s].label, SIT[s].hex])]
       .map(([s, l, c]) => `<button class="chip ${F.sit === s ? 'on' : ''}" data-s="${s}">${c ? `<span class="d" style="background:${c}"></span>` : ''}${l} <span style="opacity:.6">${s ? base.filter((e) => e.situacao === s).length : base.length}</span></button>`).join('');
@@ -911,7 +913,7 @@ async function viewEventos() {
       <thead><tr><th>Nº</th><th>Evento</th><th class="hide-md">Tipo</th><th>Período</th><th class="hide-md">Gerente</th><th>Situação</th><th class="right">Investimento</th><th></th></tr></thead>
       <tbody>${lista.map((e) => `<tr class="click" data-id="${e.id}">
         <td data-hide><span class="seq">${pad(e.numero)}</span></td>
-        <td class="c-main"><div class="ev-name">${esc(e.nome)}</div><div class="ev-sub">${ic('pin')}${esc(e.local || 'Local a definir')}</div></td>
+        <td class="c-main"><div class="ev-name">${esc(e.nome)}</div>${clienteTexto(clienteDe(e)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="ev-sub">${ic('pin')}${esc(e.local || 'Local a definir')}</div></td>
         <td data-hide class="hide-md"><span class="tag">${esc(e.tipo)}</span></td>
         <td data-hide class="nowrap">${periodo(e)}</td>
         <td data-hide class="hide-md">${esc(e.gerente || "—")}</td>
@@ -965,7 +967,7 @@ function linhasEvento(e) {
 }
 
 function textoEvento(e) {
-  return `*Nº ${pad(e.numero)} — ${e.nome}*\n${SIT[e.situacao]?.label} · ${e.tipo}\n${periodo(e)}${e.local ? ' · ' + e.local : ''}\nGerente: ${e.gerente || '—'}\n` +
+  return `*Nº ${pad(e.numero)} — ${e.nome}*\n${clienteTexto(clienteDe(e)) ? 'Cliente: ' + clienteTexto(clienteDe(e)) + '\n' : ''}${SIT[e.situacao]?.label} · ${e.tipo}\n${periodo(e)}${e.local ? ' · ' + e.local : ''}\nGerente: ${e.gerente || '—'}\n` +
     (temEntrega(e.dados?.entrega) ? `Entrega: ${entregaTexto(e.dados.entrega)}\n` : '') +
     linhasEvento(e).map(([g, d, v]) => `• ${g}${d ? ': ' + d : ''} — ${brl(v)}`).join('\n') + `\n*Total: ${brl(e.valor_total)}*`;
 }
@@ -998,6 +1000,7 @@ async function viewDetalhe(id) {
       <div class="det-head">
         <div class="grow">${pill(e.situacao)} <span class="tag brand">${esc(e.tipo)}</span>
           <h2>${esc(e.nome)}</h2>
+          ${clienteTexto(d.cliente) ? `<div style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink-2);margin-bottom:2px">${ic('user')}Cliente: ${esc(clienteTexto(d.cliente))}</div>` : ''}
           <div class="muted" style="display:flex;align-items:center;gap:6px">${ic('pin')}${esc(e.local || 'Local a definir')}</div></div>
         <div class="total-box"><span>Valor total de investimento</span><b>${brl(e.valor_total)}</b></div>
       </div>
@@ -1200,6 +1203,7 @@ function normalizarDados(d = {}) {
   return {
     contratoEvento: { data: '', area: '', valor: '', ...(d.contratoEvento || {}) },
     montadora: { data: '', nome: '', valor: '', ...(d.montadora || {}) },
+    cliente: { codigo: '', nome: '', ...(d.cliente || {}) },
     entrega: { destinatario: '', telefone: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '', ...(d.entrega || {}) },
     servicos: fx(SERVICOS, d.servicos), gastos: fx(GASTOS, d.gastos),
     envolvidos: [...(d.envolvidos || [])], hospedagem: [...(d.hospedagem || [])],
@@ -1251,6 +1255,9 @@ async function viewForm(id, duplicar = false) {
   if (!S.eventos.length) { try { S.eventos = await api.listEventos(); } catch { /* sugestões são opcionais */ } }
   const sugGerentes = uniq([...S.perfis.filter((p) => p.ativo).map((p) => p.nome), ...S.eventos.map((e) => e.gerente)]);
   const sugLocais = uniq(S.eventos.map((e) => e.local));
+  // clientes já usados (código → nome), para sugerir e completar
+  const clientesAnt = [];
+  S.eventos.forEach((e) => { const c = clienteDe(e); if (c.codigo && !clientesAnt.some((x) => x.codigo === c.codigo)) clientesAnt.push({ codigo: String(c.codigo), nome: String(c.nome || '') }); });
 
   setPage(novo ? (duplicar ? 'Duplicar evento' : 'Novo evento') : `Editar evento Nº ${pad(ev.numero)}`,
     novo ? 'Preencha as informações. O número é gerado automaticamente ao salvar.' : esc(ev.nome),
@@ -1273,6 +1280,8 @@ async function viewForm(id, duplicar = false) {
           <div class="field"><label for="f-tipo">Tipo de evento</label>
             <select id="f-tipo">${tiposDe([...S.eventos, ev]).map((t) => `<option ${ev.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="${OUTRO_TIPO}">Outro (escrever)…</option></select>
             <input id="f-tipo-outro" class="hidden" style="margin-top:8px" maxlength="60" placeholder="Escreva o tipo do evento" list="dl-tipos"></div>
+          <div class="field"><label for="f-cli-cod">Cód. do cliente</label><input id="f-cli-cod" value="${esc(d.cliente.codigo)}" maxlength="30" placeholder="Ex.: 10234" list="dl-cli-cod"></div>
+          <div class="field span2"><label for="f-cli-nome">Nome do cliente (quem promove o evento)</label><input id="f-cli-nome" value="${esc(d.cliente.nome)}" maxlength="150" placeholder="Razão social ou nome fantasia" list="dl-cli-nome"></div>
           <div class="field"><label for="f-inicio">Data de início</label><input id="f-inicio" type="date" value="${esc(ev.data_inicio || '')}"></div>
           <div class="field"><label for="f-fim">Data de término</label><input id="f-fim" type="date" value="${esc(ev.data_fim || '')}"></div>
           <div class="field"><label for="f-gerente">Gerente responsável</label><input id="f-gerente" list="dl-ger" value="${esc(ev.gerente)}" placeholder="Nome do gerente" maxlength="150"></div>
@@ -1376,6 +1385,8 @@ async function viewForm(id, duplicar = false) {
   <datalist id="dl-env"></datalist>
   <datalist id="dl-ger">${sugGerentes.map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
   <datalist id="dl-tipos">${tiposDe(S.eventos).filter((t) => !TIPOS.includes(t)).map((t) => `<option value="${esc(t)}">`).join('')}</datalist>
+  <datalist id="dl-cli-cod">${clientesAnt.map((c) => `<option value="${esc(c.codigo)}">${esc(c.nome)}</option>`).join('')}</datalist>
+  <datalist id="dl-cli-nome">${uniq(clientesAnt.map((c) => c.nome)).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
   <datalist id="dl-loc">${sugLocais.map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
   </form>`;
 
@@ -1402,6 +1413,7 @@ async function viewForm(id, duplicar = false) {
       dados: {
         contratoEvento: { data: v('ce-data'), area: area ? parseMoney(area) : '', valor: parseMoney(v('ce-valor')) },
         montadora: { data: v('mo-data'), nome: v('mo-nome'), valor: parseMoney(v('mo-valor')) },
+        cliente: { codigo: v('cli-cod'), nome: v('cli-nome') },
         entrega: {
           destinatario: v('en-dest'), telefone: v('en-tel'), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
           complemento: v('en-comp'), bairro: v('en-bairro'), cidade: v('en-cidade'), uf: v('en-uf'),
@@ -1475,6 +1487,12 @@ async function viewForm(id, duplicar = false) {
   cardAnx.addEventListener('dragleave', (x) => { if (!cardAnx.contains(x.relatedTarget)) cardAnx.classList.remove('drag'); });
   cardAnx.addEventListener('drop', (x) => { x.preventDefault(); cardAnx.classList.remove('drag'); adicionarPend([...x.dataTransfer.files]); });
   if (!novo) carregarAnexos(ev, true);
+
+  // código de cliente já usado → preenche o nome
+  $('#f-cli-cod').addEventListener('change', (x) => {
+    const c = clientesAnt.find((k) => k.codigo === x.target.value.trim());
+    if (c && c.nome && !$('#f-cli-nome').value.trim()) { $('#f-cli-nome').value = c.nome; atualizar(); }
+  });
 
   const selTipo = $('#f-tipo'), outroTipo = $('#f-tipo-outro');
   selTipo.addEventListener('change', () => {
@@ -1615,7 +1633,7 @@ async function viewRelatorios() {
   view().innerHTML = `<div class="card no-print">
     <div class="rep-filters">
       <div class="field"><label>Relatório por</label><select id="rPor">
-        ${[['situacao', 'Situação'], ['evento', 'Evento'], ['gerente', 'Gerente'], ['tipo', 'Tipo de evento'], ['periodo', 'Data a ser realizado']].map(([v, l]) => `<option value="${v}" ${R.por === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        ${[['situacao', 'Situação'], ['evento', 'Evento'], ['cliente', 'Cliente'], ['gerente', 'Gerente'], ['tipo', 'Tipo de evento'], ['periodo', 'Data a ser realizado']].map(([v, l]) => `<option value="${v}" ${R.por === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div id="rParam"></div>
       <div class="field"><label>Formato</label><select id="rFmt"><option value="resumido" ${R.formato === 'resumido' ? 'selected' : ''}>Resumido</option><option value="detalhado" ${R.formato === 'detalhado' ? 'selected' : ''}>Detalhado (todos os itens)</option></select></div>
       <button class="btn btn-primary" id="rGerar">${ic('file')}Gerar relatório</button>
@@ -1627,6 +1645,7 @@ async function viewRelatorios() {
     const sel = (lbl, opts, todos) => `<div class="field"><label>${lbl}</label><select id="rVal">${todos ? `<option value="">${todos}</option>` : ''}${opts.map(([v, l]) => `<option value="${esc(v)}" ${R.val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`;
     if (R.por === 'situacao') p.innerHTML = sel('Situação', SIT_ORDEM.map((s) => [s, SIT[s].label]), 'Todas as situações');
     if (R.por === 'evento') p.innerHTML = sel('Evento', evs.map((e) => [e.id, `Nº ${pad(e.numero)} — ${e.nome}`]));
+    if (R.por === 'cliente') p.innerHTML = sel('Cliente', uniq(evs.map((e) => clienteTexto(clienteDe(e)))).map((c) => [c, c]), 'Todos os clientes');
     if (R.por === 'gerente') p.innerHTML = sel('Gerente', gerentes.map((g) => [g, g]), 'Todos os gerentes');
     if (R.por === 'tipo') p.innerHTML = sel('Tipo', tiposDe(evs).map((t) => [t, t]), 'Todos os tipos');
     if (R.por === 'periodo') p.innerHTML = `<div class="grid g2"><div class="field"><label>De</label><input type="date" id="rDe" value="${R.de}"></div><div class="field"><label>Até</label><input type="date" id="rAte" value="${R.ate}"></div></div>`;
@@ -1642,6 +1661,7 @@ async function viewRelatorios() {
     let lista = evs, desc = '', agrupar = null;
     if (R.por === 'situacao') { if (R.val) lista = lista.filter((e) => e.situacao === R.val); else agrupar = (e) => e.situacao; desc = 'Situação: ' + (R.val ? SIT[R.val].label : 'todas'); }
     if (R.por === 'evento') { lista = lista.filter((e) => e.id === R.val); desc = 'Evento selecionado'; }
+    if (R.por === 'cliente') { if (R.val) lista = lista.filter((e) => clienteTexto(clienteDe(e)) === R.val); else agrupar = (e) => clienteTexto(clienteDe(e)) || 'Sem cliente informado'; desc = 'Cliente: ' + (R.val || 'todos'); }
     if (R.por === 'gerente') { if (R.val) lista = lista.filter((e) => e.gerente === R.val); else agrupar = (e) => e.gerente || 'Sem gerente'; desc = 'Gerente: ' + (R.val || 'todos'); }
     if (R.por === 'tipo') { if (R.val) lista = lista.filter((e) => e.tipo === R.val); else agrupar = (e) => e.tipo; desc = 'Tipo: ' + (R.val || 'todos'); }
     if (R.por === 'periodo') {
@@ -1663,9 +1683,9 @@ async function viewRelatorios() {
     const nomeGrupo = (k) => R.por === 'situacao' ? SIT[k]?.label : k;
 
     const tabela = (l) => `<div style="overflow-x:auto"><table class="mini"><thead><tr><th>Nº</th><th>Evento</th><th>Tipo</th><th>Período</th><th>Gerente</th><th>Situação</th><th class="r">Valor</th></tr></thead>
-      <tbody>${l.map((e) => `<tr><td class="seq">${pad(e.numero)}</td><td><b>${esc(e.nome)}</b><div class="small muted">${esc(e.local)}</div></td><td>${esc(e.tipo)}</td><td class="nowrap">${periodo(e)}</td><td>${esc(e.gerente)}</td><td>${pill(e.situacao)}</td><td class="r">${brl(e.valor_total)}</td></tr>`).join('')}</tbody>
+      <tbody>${l.map((e) => `<tr><td class="seq">${pad(e.numero)}</td><td><b>${esc(e.nome)}</b>${clienteTexto(clienteDe(e)) ? `<div class="small">${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="small muted">${esc(e.local)}</div></td><td>${esc(e.tipo)}</td><td class="nowrap">${periodo(e)}</td><td>${esc(e.gerente)}</td><td>${pill(e.situacao)}</td><td class="r">${brl(e.valor_total)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="6">${l.length} evento(s)</td><td class="r">${brl(soma(l, (e) => e.valor_total))}</td></tr></tfoot></table></div>`;
-    const detalhe = (e) => `<div class="rep-ev"><div class="h"><span class="seq">Nº ${pad(e.numero)}</span><b>${esc(e.nome)}</b>${pill(e.situacao)}<span class="sp"></span><span class="v">${brl(e.valor_total)}</span></div>
+    const detalhe = (e) => `<div class="rep-ev"><div class="h"><span class="seq">Nº ${pad(e.numero)}</span><b>${esc(e.nome)}</b>${clienteTexto(clienteDe(e)) ? `<span class="tag">${esc(clienteTexto(clienteDe(e)))}</span>` : ''}${pill(e.situacao)}<span class="sp"></span><span class="v">${brl(e.valor_total)}</span></div>
       <div class="i">${esc(e.tipo)} · ${periodo(e)} · ${esc(e.local || 'Local a definir')} · Gerente: ${esc(e.gerente || '—')}${(e.dados?.envolvidos || []).length ? ' · Envolvidos: ' + e.dados.envolvidos.map(esc).join(', ') : ''}</div>
       ${temEntrega(e.dados?.entrega) ? `<div class="i"><b>Entrega:</b> ${esc(entregaTexto(e.dados.entrega))}</div>` : ''}
       ${linhasEvento(e).length ? `<table class="mini"><tbody>${linhasEvento(e).map(([g, d, v]) => `<tr><td style="width:150px"><b>${g}</b></td><td>${esc(d)}</td><td class="r">${brl(v)}</td></tr>`).join('')}</tbody></table>` : '<div class="small muted">Nenhum item lançado.</div>'}</div>`;
@@ -1700,10 +1720,10 @@ async function viewRelatorios() {
 function exportarCsv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
   const q = (s) => { let t = String(s ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
-  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Local', 'Gerente', 'Início', 'Término', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega'];
+  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Cód. cliente', 'Cliente', 'Local', 'Gerente', 'Início', 'Término', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega'];
   const linhas = lista.map((e) => {
     const st = subtotais(e.dados);
-    return [pad(e.numero), SIT[e.situacao]?.label, e.tipo, e.nome, e.local, e.gerente, fdate(e.data_inicio), fdate(e.data_fim),
+    return [pad(e.numero), SIT[e.situacao]?.label, e.tipo, e.nome, clienteDe(e).codigo || '', clienteDe(e).nome || '', e.local, e.gerente, fdate(e.data_inicio), fdate(e.data_fim),
       n(st.contratos), n(st.servicos), n(st.gastos), n(st.hospedagem), n(st.alimentacao), n(st.passagens), n(e.valor_total), nomeDe(e.criado_por),
       enderecoTexto(e.dados?.entrega || {}), e.dados?.entrega?.destinatario || '', fdate(e.dados?.entrega?.data)].map(q).join(';');
   });
