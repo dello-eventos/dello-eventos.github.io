@@ -44,6 +44,7 @@ Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rod
 - **Eventos:** busca e filtros por situação, tipo, gerente e "só os meus".
 - **Cadastro do evento:**
   - situação por cor e número sequencial automático;
+  - código e nome do cliente que promove o evento (o nome se completa pelo código já usado);
   - tipo de evento da lista ou escrito à mão ("Outro (escrever)");
   - endereço de entrega de produtos, com preenchimento automático pelo CEP (ViaCEP, gratuito) e botão "Abrir no mapa";
   - contratos, serviços, gastos diversos, envolvidos, hospedagem, alimentação, passagens e observações;
@@ -53,7 +54,7 @@ Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rod
 - **Fotos e arquivos:** no próprio cadastro (enviados ao salvar) ou depois, na página do evento. Envie fotos do estande, projeto, contratos (JPG, PNG, WEBP, GIF ou PDF, até 10 MB). Fotos grandes são reduzidas automaticamente. Todos os aprovados veem; só quem criou o evento ou um admin envia e exclui. Espaço grátis: 1 GB.
 - **Aplicativo:** botão **Instalar aplicativo** no menu cria um ícone na área de trabalho (Chrome/Edge) ou na tela inicial do celular.
 - **Relatórios:**
-  - por situação, evento, gerente, tipo ou período;
+  - por situação, evento, cliente, gerente, tipo ou período;
   - formato resumido ou detalhado;
   - Imprimir/PDF, WhatsApp, E-mail e Excel.
 - **Histórico:** registro automático de quem criou, alterou (com antes e depois) ou excluiu cada evento.
