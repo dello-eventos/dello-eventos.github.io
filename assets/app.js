@@ -972,6 +972,53 @@ function textoEvento(e) {
     linhasEvento(e).map(([g, d, v]) => `• ${g}${d ? ': ' + d : ''} — ${brl(v)}`).join('\n') + `\n*Total: ${brl(e.valor_total)}*`;
 }
 
+/* Ficha de impressão: só o que foi preenchido, compacta para caber em uma página */
+function fichaHtml(e) {
+  const d = e.dados || {}, st = subtotais(d);
+  const t = (x) => String(x ?? '').trim();
+  const kv = (l, v) => t(v) ? `<div class="f-kv"><span>${l}</span>${esc(t(v))}</div>` : '';
+  const bloco = (titulo, corpo, dir = '') => t(corpo.replace(/<[^>]*>/g, '')) ? `<section class="f-bl"><h4>${titulo}${dir ? `<b>${dir}</b>` : ''}</h4>${corpo}</section>` : '';
+  const linhas = (rows) => rows.length ? `<table>${rows.map((r) => `<tr><td>${r[0]}</td><td class="r">${r[1]}</td></tr>`).join('')}</table>` : '';
+  const junta = (...a) => a.map(t).filter(Boolean).map(esc).join(' · ');
+  const ce = d.contratoEvento || {}, mo = d.montadora || {}, en = d.entrega || {}, cli = d.cliente || {};
+
+  const contratos = linhas([
+    ...(ce.valor || ce.data || ce.area ? [[`Espaço do evento${ce.area ? ' · ' + esc(String(ce.area).replace('.', ',')) + ' m²' : ''}${ce.data ? ' · aprovado ' + fdate(ce.data) : ''}`, brl(ce.valor)]] : []),
+    ...(mo.valor || mo.nome ? [[`Montadora${mo.nome ? ': ' + esc(mo.nome) : ''}${mo.data ? ' · ' + fdate(mo.data) : ''}`, brl(mo.valor)]] : []),
+  ]);
+  const itens = (arr, comObs) => linhas((arr || []).filter((x) => x.qt || x.valor || x.obs).map((x) => [
+    `${esc(x.nome)}${x.qt ? ` <i>× ${esc(x.qt)}</i>` : ''}${comObs && x.obs ? ` <i>— ${esc(x.obs)}</i>` : ''}`, brl(x.valor)]));
+  const hosp = linhas((d.hospedagem || []).map((h) => [junta(h.nome, h.hotel, (h.chegada || h.saida) && `${fdate(h.chegada)} a ${fdate(h.saida)}`, h.codigo && 'Res. ' + h.codigo, [h.telefone, h.email].filter(Boolean).join(' ')), brl(h.valor)]));
+  const alim = linhas((d.alimentacao || []).map((a) => [junta(fdate(a.data), a.local, a.obs), brl(a.valor)]));
+  const pass = linhas((d.passagens || []).map((x) => [junta(x.quem, x.meio, (x.origem || x.destino) && `${x.origem || '?'} → ${x.destino || '?'}`, x.data && fdate(x.data) + (x.hora ? ' ' + x.hora : ''), x.codigo && 'Res. ' + x.codigo), brl(x.valor)]));
+  const entrega = temEntrega(en) ? [
+    kv('Endereço', enderecoTexto(en)), kv('Recebe', [en.destinatario, en.telefone, en.email].filter(Boolean).join(' · ')),
+    kv('Entrega', [fdate(en.data), en.horario].filter(Boolean).join(' ')), kv('Obs.', en.obs)].join('') : '';
+  const resumo = linhas(CATS.filter(([k]) => st[k]).map(([k, l]) => [l, brl(st[k])]));
+
+  return `<div class="ficha print-only">
+    <header class="f-top"><img src="assets/logo-dello.png" alt="Dello">
+      <div class="f-tit"><small>Ficha do evento Nº ${pad(e.numero)}</small><h2>${esc(e.nome)}</h2>
+        <div>${junta(e.tipo, periodo(e), e.local)}</div>
+        ${clienteTexto(cli) || e.gerente ? `<div>${junta(clienteTexto(cli) && 'Cliente: ' + clienteTexto(cli), e.gerente && 'Gerente: ' + e.gerente)}</div>` : ''}</div>
+      <div class="f-tot"><span class="pill ${SIT[e.situacao]?.cor || 'gray'}">${SIT[e.situacao]?.label || ''}</span><small>Total do investimento</small><b>${brl(e.valor_total)}</b></div>
+    </header>
+    <div class="f-cols">
+      ${bloco('Endereço de entrega', entrega)}
+      ${bloco('Contratos', contratos, st.contratos ? brl(st.contratos) : '')}
+      ${bloco('Serviços contratados', itens(d.servicos), st.servicos ? brl(st.servicos) : '')}
+      ${bloco('Gastos diversos', itens(d.gastos, true), st.gastos ? brl(st.gastos) : '')}
+      ${bloco('Envolvidos', (d.envolvidos || []).length ? `<p>${d.envolvidos.map(esc).join(', ')}</p>` : '')}
+      ${bloco('Hospedagem', hosp, st.hospedagem ? brl(st.hospedagem) : '')}
+      ${bloco('Alimentação', alim, st.alimentacao ? brl(st.alimentacao) : '')}
+      ${bloco('Passagens / condução', pass, st.passagens ? brl(st.passagens) : '')}
+      ${bloco('Observações', d.observacoes ? `<p class="f-obs">${esc(d.observacoes)}</p>` : '')}
+      ${bloco('Resumo do investimento', resumo ? resumo + `<table><tr class="f-sum"><td>Total</td><td class="r">${brl(e.valor_total)}</td></tr></table>` : '')}
+    </div>
+    <footer class="f-rod"><span id="fichaAnx"></span><span>Cadastrado por ${esc(nomeDe(e.criado_por))} em ${fdia(e.criado_em)} · Impresso em ${fdt(new Date())} por ${esc(S.me?.nome || '')}</span></footer>
+  </div>`;
+}
+
 async function viewDetalhe(id) {
   carregando();
   const e = await api.getEvento(id);
@@ -993,7 +1040,7 @@ async function viewDetalhe(id) {
   const ce = d.contratoEvento || {}, mo = d.montadora || {};
   const maxC = Math.max(...Object.values(st), 1);
 
-  view().innerHTML = `
+  view().innerHTML = fichaHtml(e) + `<div class="no-print">
     ${pode ? '' : `<div class="info no-print">${ic('lock')}<div>Somente leitura. Este evento foi criado por <b>${esc(nomeDe(e.criado_por))}</b>; só essa pessoa ou um administrador pode alterá-lo.</div></div>`}
     <div class="print-only" style="margin-bottom:16px"><img src="assets/logo-dello.png" alt="Dello" style="width:90px"></div>
     <div class="card">
@@ -1048,7 +1095,7 @@ async function viewDetalhe(id) {
         ${pode ? `<label class="btn btn-sm btn-primary no-print" for="anxInput">${ic('upload')}Adicionar</label><input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">` : ''}</div>
         <div id="anxBox"></div></div>
       <div class="card full no-print"><div class="card-h"><h3>Histórico deste evento</h3></div><div id="dHist"><div class="spinner"></div></div></div>
-    </div>`;
+    </div></div>`;
 
   $('#dPrint').onclick = () => window.print();
   $('#enCopiar')?.addEventListener('click', async () => {
@@ -1120,6 +1167,8 @@ async function carregarAnexos(ev, pode) {
   catch (x) { box.innerHTML = `<p class="muted small" style="margin:0">Não foi possível carregar os arquivos. ${esc(msgErro(x))}</p>`; return; }
   if (!$('#anxBox')) return;
   $('#anxCount').textContent = lista.length ? `(${lista.length})` : '';
+  const fa = $('#fichaAnx');
+  if (fa) fa.textContent = lista.length ? `${lista.length} foto(s)/arquivo(s) anexado(s) no sistema` : '';
   if (!lista.length) {
     $('#anxEmail')?.classList.add('hidden');
     box.innerHTML = `<div class="anx-empty">${ic('image')}<div>${pode ? 'Nenhum arquivo ainda. Clique em <b>Adicionar</b> ou arraste fotos e PDFs para cá (fotos do estande, projeto, contratos…).' : 'Nenhum arquivo anexado.'}</div></div>`;
