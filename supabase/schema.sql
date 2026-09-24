@@ -38,8 +38,8 @@ begin
   insert into perfis (id, nome, email, papel, ativo)
   values (
     new.id,
-    coalesce(nullif(trim(new.raw_user_meta_data ->> 'nome'), ''), split_part(new.email, '@', 1)),
-    new.email,
+    left(coalesce(nullif(trim(new.raw_user_meta_data ->> 'nome'), ''), split_part(new.email, '@', 1)), 120),
+    left(new.email, 320),
     case when primeiro then 'admin' else 'usuario' end,
     primeiro
   );
@@ -111,16 +111,17 @@ create index if not exists eventos_inicio_idx on public.eventos (data_inicio);
 create index if not exists eventos_criado_por_idx on public.eventos (criado_por);
 
 -- Valor total calculado no próprio banco (não depende do navegador)
+-- Valores negativos contam como zero.
 create or replace function public.soma_valores(arr jsonb) returns numeric
-language sql immutable as $$
-  select coalesce(sum(coalesce(nullif(x ->> 'valor', '')::numeric, 0)), 0)
+language sql immutable set search_path = '' as $$
+  select coalesce(sum(greatest(0, coalesce(nullif(x ->> 'valor', '')::numeric, 0))), 0)
   from jsonb_array_elements(case when jsonb_typeof(arr) = 'array' then arr else '[]'::jsonb end) x;
 $$;
 
 create or replace function public.calcular_total(d jsonb) returns numeric
-language sql immutable as $$
-  select coalesce(nullif(d -> 'contratoEvento' ->> 'valor', '')::numeric, 0)
-       + coalesce(nullif(d -> 'montadora' ->> 'valor', '')::numeric, 0)
+language sql immutable set search_path = '' as $$
+  select greatest(0, coalesce(nullif(d -> 'contratoEvento' ->> 'valor', '')::numeric, 0))
+       + greatest(0, coalesce(nullif(d -> 'montadora' ->> 'valor', '')::numeric, 0))
        + public.soma_valores(d -> 'servicos')
        + public.soma_valores(d -> 'gastos')
        + public.soma_valores(d -> 'hospedagem')
@@ -259,3 +260,13 @@ revoke execute on function public.is_ativo() from public, anon;
 revoke execute on function public.is_admin() from public, anon;
 grant execute on function public.is_ativo() to authenticated;
 grant execute on function public.is_admin() to authenticated;
+
+-- Limites de tamanho (evita textos gigantes gravados direto pela API)
+alter table public.perfis drop constraint if exists perfis_tamanhos;
+alter table public.perfis add constraint perfis_tamanhos
+  check (char_length(nome) <= 120 and char_length(email) <= 320);
+
+alter table public.eventos drop constraint if exists eventos_tamanhos;
+alter table public.eventos add constraint eventos_tamanhos
+  check (char_length(nome) <= 200 and char_length(local) <= 300 and char_length(gerente) <= 150
+         and char_length(tipo) <= 60 and octet_length(dados::text) <= 300000);

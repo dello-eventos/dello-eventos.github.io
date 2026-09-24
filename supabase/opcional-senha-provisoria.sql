@@ -11,8 +11,8 @@ begin
   if not public.is_admin() then
     raise exception 'permission denied';
   end if;
-  if length(coalesce(nova_senha, '')) < 6 then
-    raise exception 'A senha precisa ter pelo menos 6 caracteres.';
+  if length(coalesce(nova_senha, '')) < 8 then
+    raise exception 'A senha precisa ter pelo menos 8 caracteres.';
   end if;
   update auth.users
      set encrypted_password = extensions.crypt(nova_senha, extensions.gen_salt('bf')),
