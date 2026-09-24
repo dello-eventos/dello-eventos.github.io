@@ -1,0 +1,20 @@
+# Evita que o projeto gratuito do Supabase seja pausado por inatividade (pausa após 7 dias sem uso).
+# Faz uma consulta leve a cada 3 dias. Não lê nem altera dados.
+name: Manter banco ativo
+
+on:
+  schedule:
+    - cron: '0 12 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Consultar Supabase
+        run: |
+          URL=$(grep -oP "supabaseUrl:\s*'\K[^']+" assets/config.js)
+          KEY=$(grep -oP "supabaseAnonKey:\s*'\K[^']+" assets/config.js)
+          curl -s -o /dev/null -w "auth: %{http_code}\n" "$URL/auth/v1/settings" -H "apikey: $KEY"
+          curl -s -o /dev/null -w "rest: %{http_code}\n" "$URL/rest/v1/eventos?select=id&limit=1" -H "apikey: $KEY"
