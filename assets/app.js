@@ -195,6 +195,9 @@ function sanear(ev) {
   return ev;
 }
 
+const senhaFraca = (s) => String(s || '').length < 8 || !/[A-Za-z]/.test(s) || !/\d/.test(s);
+const MSG_SENHA = 'A senha precisa ter pelo menos 8 caracteres, com letras e números.';
+
 function msgErro(e) {
   const m = String(e?.message || e || '');
   if (/Invalid login credentials/i.test(m)) return 'E-mail ou senha incorretos.';
@@ -210,6 +213,11 @@ function msgErro(e) {
   if (/mime type|invalid_mime/i.test(m)) return 'Tipo de arquivo não permitido. Use fotos (JPG, PNG, WEBP, GIF) ou PDF.';
   if (/Bucket not found/i.test(m)) return 'O armazenamento de arquivos ainda não foi configurado.';
   if (/eventos_datas_ok/i.test(m)) return 'A data de término não pode ser anterior à data de início.';
+  if (/should contain at least one character|weak_password|weak password/i.test(m)) return 'A senha precisa ter pelo menos 8 caracteres, com letras e números.';
+  if (/PGRST|relation|column|schema|violates|syntax|function|constraint|null value|duplicate key|JSON|operator|invalid input|uuid|permission|policy|jwt/i.test(m)) {
+    console.error('Detalhe técnico do erro:', m);
+    return 'Não foi possível concluir a operação. Tente de novo; se continuar, avise um administrador.';
+  }
   return m || 'Ocorreu um erro inesperado.';
 }
 
@@ -575,7 +583,7 @@ function pedirNovaSenha() {
     body: `<div class="field"><label>Nova senha</label><input type="password" name="s1" autocomplete="new-password" required></div>
            <div class="field"><label>Confirme a nova senha</label><input type="password" name="s2" autocomplete="new-password" required></div>`,
     onSubmit: async ({ s1, s2 }) => {
-      if ((s1 || '').length < 8) throw new Error('A senha precisa ter pelo menos 8 caracteres.');
+      if (senhaFraca(s1)) throw new Error(MSG_SENHA);
       if (s1 !== s2) throw new Error('As senhas não conferem.');
       await api.updatePassword(s1);
       toast('Senha atualizada');
@@ -614,7 +622,7 @@ function renderAuth(modo = 'entrar', aviso = null) {
         ${aviso?.ok ? `<div class="msg ok">${esc(aviso.ok)}</div>` : ''}
         ${modo === 'criar' ? `<div class="field"><label for="aNome">Nome completo</label><input id="aNome" name="nome" autocomplete="name" maxlength="120" value="${esc(aviso?.nome || '')}" required></div>` : ''}
         <div class="field"><label for="aEmail">E-mail</label><input id="aEmail" name="email" type="email" autocomplete="email" maxlength="200" value="${esc(aviso?.email || '')}" required></div>
-        ${modo !== 'recuperar' ? `<div class="field"><label for="aSenha">Senha</label><input id="aSenha" name="senha" type="password" autocomplete="${modo === 'criar' ? 'new-password' : 'current-password'}" required>${modo === 'criar' ? '<div class="hint">Mínimo de 8 caracteres.</div>' : ''}</div>` : ''}
+        ${modo !== 'recuperar' ? `<div class="field"><label for="aSenha">Senha</label><input id="aSenha" name="senha" type="password" autocomplete="${modo === 'criar' ? 'new-password' : 'current-password'}" required>${modo === 'criar' ? '<div class="hint">Mínimo de 8 caracteres, com letras e números.</div>' : ''}</div>` : ''}
         ${modo === 'criar' ? `<div class="field"><label for="aSenha2">Confirme a senha</label><input id="aSenha2" name="senha2" type="password" autocomplete="new-password" required></div>` : ''}
         ${modo === 'entrar' ? `<div class="row-end"><a class="linkish" data-m="recuperar">Esqueci minha senha</a></div>` : ''}
         <button class="btn btn-primary btn-block" type="submit">${cfg.ok}</button>
@@ -642,7 +650,7 @@ function renderAuth(modo = 'entrar', aviso = null) {
         await entrar();
       } else if (modo === 'criar') {
         if (!d.nome?.trim()) return falha('Informe seu nome.');
-        if ((d.senha || '').length < 8) return falha('A senha precisa ter pelo menos 8 caracteres.');
+        if (senhaFraca(d.senha)) return falha(MSG_SENHA);
         if (d.senha !== d.senha2) return falha('As senhas não conferem.');
         const r = await api.signUp(d.nome.trim(), email, d.senha);
         if (r?.session) await entrar();
@@ -724,7 +732,7 @@ function renderShell() {
     body: `<div class="field"><label>Nova senha</label><input type="password" name="s1" autocomplete="new-password"></div>
            <div class="field"><label>Confirme a nova senha</label><input type="password" name="s2" autocomplete="new-password"></div>`,
     onSubmit: async ({ s1, s2 }) => {
-      if ((s1 || '').length < 8) throw new Error('A senha precisa ter pelo menos 8 caracteres.');
+      if (senhaFraca(s1)) throw new Error(MSG_SENHA);
       if (s1 !== s2) throw new Error('As senhas não conferem.');
       await api.updatePassword(s1);
       toast('Senha alterada com sucesso');
@@ -1239,9 +1247,18 @@ async function subirArquivos(evId, arquivos, progresso) {
 async function enviarAnexos(ev, arquivos, pode) {
   const lista = [...(arquivos || [])];
   if (!lista.length) return;
-  const st = $('#anxStatus');
-  const ok = await subirArquivos(ev.id, lista, (i, n) => { st.textContent = `Enviando ${i} de ${n}…`; st.classList.remove('hidden'); });
-  st.classList.add('hidden');
+  const st = $('#anxStatus'), inp = $('#anxInput'), btn = $('label[for=anxInput]');
+  if (inp?.disabled) return;
+  if (inp) inp.disabled = true;
+  btn?.classList.add('ocupado');
+  let ok = 0;
+  try {
+    ok = await subirArquivos(ev.id, lista, (i, n) => { st.textContent = `Enviando ${i} de ${n}…`; st.classList.remove('hidden'); });
+  } finally {
+    st.classList.add('hidden');
+    if (inp) inp.disabled = false;
+    btn?.classList.remove('ocupado');
+  }
   if (ok) toast(ok === 1 ? 'Arquivo enviado' : `${ok} arquivos enviados`);
   carregarAnexos(ev, pode);
 }
@@ -1914,9 +1931,9 @@ async function viewUsuarios() {
     $('[data-senha]', tr)?.addEventListener('click', () => modal({
       title: `Senha provisória para ${p.nome}`, icon: 'key', ok: 'Definir senha',
       text: 'Informe a nova senha e passe para a pessoa por um canal seguro. Ela pode trocar depois, no ícone de chave.',
-      body: `<div class="field"><label>Nova senha (mínimo 8 caracteres)</label><input type="text" name="s1" autocomplete="off"></div>`,
+      body: `<div class="field"><label>Nova senha (mínimo 8 caracteres, com letras e números)</label><input type="text" name="s1" autocomplete="off"></div>`,
       onSubmit: async ({ s1 }) => {
-        if ((s1 || '').length < 8) throw new Error('A senha precisa ter pelo menos 8 caracteres.');
+        if (senhaFraca(s1)) throw new Error(MSG_SENHA);
         await api.adminSenha(id, s1);
         toast('Senha provisória definida para ' + p.nome);
       },
