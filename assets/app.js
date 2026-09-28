@@ -269,6 +269,7 @@ function SupaAPI() {
   const url = () => location.origin + location.pathname;
   const campos = (ev) => ({
     situacao: ev.situacao, tipo: ev.tipo, nome: ev.nome, local: ev.local || '', gerente: ev.gerente || '',
+    visibilidade: ev.visibilidade === 'privado' ? 'privado' : 'todos',
     data_inicio: ev.data_inicio || null, data_fim: ev.data_fim || null, dados: ev.dados,
     valor_total: totalDe(ev.dados),
   });
@@ -353,11 +354,14 @@ function DemoAPI() {
   const perfil = (id) => db.perfis.find((p) => p.id === id);
   const isAdmin = () => perfil(atual)?.papel === 'admin' && perfil(atual)?.ativo;
   const podeEditar = (ev) => isAdmin() || ev.criado_por === atual;
+  const visivel = (ev) => ev.visibilidade !== 'privado' || ev.criado_por === atual || isAdmin();
+  const histVisivel = (h) => !h.evento_privado || h.evento_dono === atual || isAdmin();
   const anexosMem = {};
   const negar = () => { throw new Error('permission denied'); };
   const log = (acao, ev, detalhes = {}) => db.historico.unshift({
     id: ++db.hseq, evento_id: ev.id, evento_numero: ev.numero, evento_nome: ev.nome, acao,
     usuario_id: atual, usuario_nome: perfil(atual)?.nome || '—', em: new Date().toISOString(), detalhes,
+    evento_privado: ev.visibilidade === 'privado', evento_dono: ev.criado_por,
   });
 
   function semente() {
@@ -412,8 +416,8 @@ function DemoAPI() {
     setUser(id) { atual = id; store.set(KEY + '.user', id); },
     reset() { store.del(KEY); store.del(KEY + '.user'); },
     async signIn() {}, async signUp() {}, async resetPassword() {}, async updatePassword() {}, async signOut() {},
-    async listEventos() { return clone(db.eventos).sort((a, b) => b.numero - a.numero); },
-    async getEvento(id) { const e = db.eventos.find((x) => x.id === id); return e ? clone(e) : null; },
+    async listEventos() { return clone(db.eventos.filter(visivel)).sort((a, b) => b.numero - a.numero); },
+    async getEvento(id) { const e = db.eventos.find((x) => x.id === id); return e && visivel(e) ? clone(e) : null; },
     async saveEvento(ev) {
       const agora = new Date().toISOString();
       const dados = clone(ev.dados);
@@ -423,9 +427,11 @@ function DemoAPI() {
         const old = db.eventos[i];
         if (!podeEditar(old)) negar();
         const novo = { ...old, situacao: ev.situacao, tipo: ev.tipo, nome: ev.nome, local: ev.local, gerente: ev.gerente,
+          visibilidade: ev.visibilidade === 'privado' ? 'privado' : 'todos',
           data_inicio: ev.data_inicio || null, data_fim: ev.data_fim || null, dados, valor_total: totalDe(dados), atualizado_por: atual, atualizado_em: agora };
         const det = {};
-        ['situacao', 'nome', 'tipo', 'local', 'gerente', 'data_inicio', 'data_fim', 'valor_total'].forEach((k) => { if ((old[k] ?? null) !== (novo[k] ?? null)) det[k] = [old[k] ?? null, novo[k] ?? null]; });
+        if (old.visibilidade !== novo.visibilidade) db.historico.forEach((h) => { if (h.evento_id === novo.id) h.evento_privado = novo.visibilidade === 'privado'; });
+        ['situacao', 'nome', 'tipo', 'local', 'gerente', 'data_inicio', 'data_fim', 'valor_total', 'visibilidade'].forEach((k) => { if ((old[k] ?? null) !== (novo[k] ?? null)) det[k] = [old[k] ?? null, novo[k] ?? null]; });
         if (JSON.stringify(old.dados) !== JSON.stringify(novo.dados)) det.dados = true;
         db.eventos[i] = novo;
         if (Object.keys(det).length) log('alterou', novo, det);
@@ -433,6 +439,7 @@ function DemoAPI() {
         return clone(novo);
       }
       const novo = { id: uid(), numero: ++db.seq, situacao: ev.situacao, tipo: ev.tipo, nome: ev.nome, local: ev.local, gerente: ev.gerente,
+        visibilidade: ev.visibilidade === 'privado' ? 'privado' : 'todos',
         data_inicio: ev.data_inicio || null, data_fim: ev.data_fim || null, dados, valor_total: totalDe(dados),
         criado_por: atual, criado_em: agora, atualizado_por: atual, atualizado_em: agora };
       db.eventos.push(novo);
@@ -473,7 +480,7 @@ function DemoAPI() {
       anexosMem[id] = (anexosMem[id] || []).filter((a) => a.path !== path);
     },
     async limparAnexos(id) { delete anexosMem[id]; },
-    async historico(eventoId) { return clone(eventoId ? db.historico.filter((h) => h.evento_id === eventoId) : db.historico).slice(0, 400); },
+    async historico(eventoId) { return clone((eventoId ? db.historico.filter((h) => h.evento_id === eventoId) : db.historico).filter(histVisivel)).slice(0, 400); },
   };
 }
 
@@ -922,7 +929,7 @@ async function viewEventos() {
       <thead><tr><th>Nº</th><th>Evento</th><th class="hide-md">Tipo</th><th>Período</th><th class="hide-md">Gerente</th><th>Situação</th><th class="right">Investimento</th><th></th></tr></thead>
       <tbody>${lista.map((e) => `<tr class="click" data-id="${e.id}">
         <td data-hide><span class="seq">${pad(e.numero)}</span></td>
-        <td class="c-main"><div class="ev-name">${esc(e.nome)}</div>${clienteTexto(clienteDe(e)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="ev-sub">${ic('pin')}${esc(e.local || 'Local a definir')}</div></td>
+        <td class="c-main"><div class="ev-name">${esc(e.nome)}${e.visibilidade === 'privado' ? ` <span class="tag priv" title="Privado: só quem criou e os administradores veem">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(e)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="ev-sub">${ic('pin')}${esc(e.local || 'Local a definir')}</div></td>
         <td data-hide class="hide-md"><span class="tag">${esc(e.tipo)}</span></td>
         <td data-hide class="nowrap">${periodo(e)}</td>
         <td data-hide class="hide-md">${esc(e.gerente || "—")}</td>
@@ -1007,7 +1014,7 @@ function fichaHtml(e) {
 
   return `<div class="ficha print-only">
     <header class="f-top"><img src="assets/logo-dello.png" alt="Dello">
-      <div class="f-tit"><small>Ficha do evento Nº ${pad(e.numero)}</small><h2>${esc(e.nome)}</h2>
+      <div class="f-tit"><small>Ficha do evento Nº ${pad(e.numero)}${e.visibilidade === 'privado' ? ' · Privado' : ''}</small><h2>${esc(e.nome)}</h2>
         <div>${junta(e.tipo, periodo(e), e.local)}</div>
         ${clienteTexto(cli) || e.gerente ? `<div>${junta(clienteTexto(cli) && 'Cliente: ' + clienteTexto(cli), e.gerente && 'Gerente: ' + e.gerente)}</div>` : ''}</div>
       <div class="f-tot"><span class="pill ${SIT[e.situacao]?.cor || 'gray'}">${SIT[e.situacao]?.label || ''}</span><small>Total do investimento</small><b>${brl(e.valor_total)}</b></div>
@@ -1054,7 +1061,7 @@ async function viewDetalhe(id) {
     <div class="print-only" style="margin-bottom:16px"><img src="assets/logo-dello.png" alt="Dello" style="width:90px"></div>
     <div class="card">
       <div class="det-head">
-        <div class="grow">${pill(e.situacao)} <span class="tag brand">${esc(e.tipo)}</span>
+        <div class="grow">${pill(e.situacao)} <span class="tag brand">${esc(e.tipo)}</span>${e.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado · só quem criou e administradores veem</span>` : ''}
           <h2>${esc(e.nome)}</h2>
           ${clienteTexto(d.cliente) ? `<div style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink-2);margin-bottom:2px">${ic('user')}Cliente: ${esc(clienteTexto(d.cliente))}</div>` : ''}
           <div class="muted" style="display:flex;align-items:center;gap:6px">${ic('pin')}${esc(e.local || 'Local a definir')}</div></div>
@@ -1270,7 +1277,7 @@ function abrirGaleria(imgs, inicio) {
    Formulário (incluir / alterar / duplicar)
    ================================================================ */
 function novoEvento() {
-  return { id: null, numero: null, situacao: 'analise', tipo: TIPOS[0], data_inicio: '', data_fim: '', nome: '', local: '', gerente: S.me?.nome || '', dados: {} };
+  return { id: null, numero: null, situacao: 'analise', visibilidade: 'todos', tipo: TIPOS[0], data_inicio: '', data_fim: '', nome: '', local: '', gerente: S.me?.nome || '', dados: {} };
 }
 function normalizarDados(d = {}) {
   const fx = (lista, salvos = []) => [
@@ -1354,6 +1361,11 @@ async function viewForm(id, duplicar = false) {
         ${secH(1, 'Dados do evento', 'Informações que aparecem no resumo e nos relatórios')}
         <div class="lbl">Situação</div>
         <div class="seg" id="seg" style="margin-bottom:18px">${SIT_ORDEM.map((s) => `<label class="${SIT[s].cor} ${ev.situacao === s ? 'on' : ''}"><input type="radio" name="sit" value="${s}" ${ev.situacao === s ? 'checked' : ''}><span class="d"></span><span><b>${SIT[s].label}</b><small>${SIT[s].cx}</small></span></label>`).join('')}</div>
+        ${novo || ev.criado_por === S.me.id ? `<div class="lbl">Quem pode ver este evento</div>
+        <div class="seg seg2" id="segVis" style="margin-bottom:18px">
+          <label class="vis ${ev.visibilidade !== 'privado' ? 'on' : ''}"><input type="radio" name="vis" value="todos" ${ev.visibilidade !== 'privado' ? 'checked' : ''}>${ic('users')}<span><b>Para todos</b><small>Todos os usuários aprovados veem</small></span></label>
+          <label class="vis ${ev.visibilidade === 'privado' ? 'on' : ''}"><input type="radio" name="vis" value="privado" ${ev.visibilidade === 'privado' ? 'checked' : ''}>${ic('lock')}<span><b>Privado</b><small>Só você e os administradores veem</small></span></label>
+        </div>` : ''}
         <div class="grid g3">
           <div class="field span2"><label for="f-nome">Nome do evento <span class="req">*</span></label><input id="f-nome" value="${esc(ev.nome)}" placeholder="Ex.: Feira Escolar 2027" maxlength="160"></div>
           <div class="field"><label for="f-tipo">Tipo de evento</label>
@@ -1492,7 +1504,8 @@ async function viewForm(id, duplicar = false) {
     });
     const area = v('ce-area');
     return {
-      situacao: $('input[name=sit]:checked', frm)?.value || 'analise', tipo: v('tipo') === OUTRO_TIPO ? v('tipo-outro') : v('tipo'), nome: v('nome'), local: v('local'), gerente: v('gerente'),
+      situacao: $('input[name=sit]:checked', frm)?.value || 'analise',
+      visibilidade: $('input[name=vis]:checked', frm)?.value || ev.visibilidade || 'todos', tipo: v('tipo') === OUTRO_TIPO ? v('tipo-outro') : v('tipo'), nome: v('nome'), local: v('local'), gerente: v('gerente'),
       data_inicio: v('inicio'), data_fim: v('fim'),
       dados: {
         contratoEvento: { data: v('ce-data'), area: area ? parseMoney(area) : '', valor: parseMoney(v('ce-valor')) },
@@ -1524,7 +1537,7 @@ async function viewForm(id, duplicar = false) {
     $('#rs-tot').textContent = brl(tot);
     $('#sb-tot').textContent = brl(tot);
     $$('.items tr[data-item]').forEach((tr) => tr.classList.toggle('has', !!($('[data-k=qt]', tr).value || parseMoney($('[data-k=valor]', tr).value))));
-    $$('#seg label').forEach((l) => l.classList.toggle('on', $('input', l).checked));
+    $$('#seg label, #segVis label').forEach((l) => l.classList.toggle('on', $('input', l).checked));
     $('#dl-env').innerHTML = uniq(f.dados.envolvidos).map((n) => `<option value="${esc(n)}">`).join('');
   };
   const renumerar = (box) => $$('[data-rep]', box).forEach((r, i) => { const n = $('.n', r); n.textContent = box.id === 'rp-envolvidos' ? i + 1 : `${REP[box.id.slice(3)].titulo} ${i + 1}`; });
@@ -1824,10 +1837,11 @@ function exportarCsv(lista) {
 /* ================================================================
    Histórico
    ================================================================ */
-const CAMPOS_H = { situacao: 'Situação', nome: 'Nome', tipo: 'Tipo', local: 'Local', gerente: 'Gerente', data_inicio: 'Início', data_fim: 'Término', valor_total: 'Valor total' };
+const CAMPOS_H = { situacao: 'Situação', nome: 'Nome', tipo: 'Tipo', local: 'Local', gerente: 'Gerente', data_inicio: 'Início', data_fim: 'Término', valor_total: 'Valor total', visibilidade: 'Visibilidade' };
 function fmtCampo(k, v) {
   if (v == null || v === '') return '—';
   if (k === 'situacao') return SIT[v]?.label || v;
+  if (k === 'visibilidade') return v === 'privado' ? 'Privado' : 'Para todos';
   if (k === 'valor_total') return brl(v);
   if (k.startsWith('data_')) return fdate(v);
   return String(v);
