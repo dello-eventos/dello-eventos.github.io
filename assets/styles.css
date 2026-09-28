@@ -663,3 +663,17 @@ label.ocupado { opacity: .55; pointer-events: none; }
 .captura [style*="overflow-x"], .captura .tbl-wrap { overflow: visible !important; }
 .spinner.mini { width: 14px; height: 14px; border-width: 2px; display: inline-block; vertical-align: -2px; }
 @media print { .report [style*="overflow-x"], .tbl-wrap { overflow: visible !important; } }
+
+/* ---------- telas largas: usar toda a largura ---------- */
+.content { max-width: none; }
+.form-layout { max-width: 1640px; }
+@media (min-width: 1700px) {
+  .topbar { padding-left: 44px; padding-right: 44px; }
+  .content { padding-left: 44px; padding-right: 44px; }
+  .demo-bar { margin-left: 44px; margin-right: 44px; }
+  .kpis, .dash { gap: 22px; }
+  .dash { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+  .cols { height: 260px; }
+  .det-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .det-grid .full { grid-column: 1 / -1; }
+}
