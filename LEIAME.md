@@ -17,6 +17,8 @@ Sistema para cadastrar, aprovar e acompanhar o investimento em eventos (feiras, 
 | **Usuário** | todos | sim | **só os que criou** | não |
 | **Pendente** | não | não | não | não |
 
+**Eventos privados:** quem cria o evento escolhe **Para todos** (padrão) ou **Privado**. Um evento privado só aparece para quem o criou e para os administradores (lista, busca, painel, relatórios, histórico e fotos).
+
 As regras ficam **no banco de dados** (Row Level Security), não só na tela.
 
 - A **primeira conta criada vira administrador automaticamente**.
@@ -81,6 +83,7 @@ assets/icons/                        ícones do aplicativo
 manifest.webmanifest                 configuração do aplicativo instalável
 supabase/schema.sql                  tabelas, permissões e histórico (já aplicado)
 supabase/opcional-senha-provisoria.sql  senha provisória definida pelo admin (já aplicado)
+supabase/migracao-visibilidade.sql   eventos privados (já aplicado)
 .github/workflows/manter-banco-ativo.yml  consulta a cada 3 dias para o banco não pausar
 ```
 
