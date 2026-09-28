@@ -17,6 +17,8 @@ const SIT_ORDEM = ['reprovado', 'analise', 'aprovado'];
 const TIPOS = ['Feira', 'Convenção', 'Workshop', 'Ação em cliente', 'Show room', 'Visita na fábrica', 'Palestra', 'Confraternização'];
 const SERVICOS = ['Bancada', 'Prateleiras', 'Mesa', 'Cadeiras', 'TV'];
 const GASTOS = ['Catálogo', 'Amostras', 'Brindes', 'Camisetas', 'Banner', 'Banco', 'Base giratória', 'Suportes', 'Plataforma', 'Toalhas', 'Flores', 'Outros'];
+const TIPOS_ATV = ['Campanha', 'Ação promocional', 'Material gráfico', 'Mídia / anúncio', 'Vídeo', 'Treinamento'];
+const SERVICOS_ATV = ['', 'Anúncio', 'Folder', 'Panfleto', 'Catálogo', 'Vídeo', 'Outros'];
 const MEIOS = ['Aéreo', 'Ônibus', 'Carro', 'Carro alugado', 'Trem', 'Metrô', 'Táxi', 'Uber / 99', 'Van', 'Outro'];
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 const OUTRO_TIPO = '__outro__';
@@ -43,6 +45,13 @@ const REP = {
     { k: 'data', l: 'Data', t: 'date' }, { k: 'hora', l: 'Hora', t: 'time' }, { k: 'codigo', l: 'Cód. reserva' }, { k: 'valor', l: 'Valor', t: 'money' },
   ] },
 };
+
+REP.servicosAtv = { add: 'Adicionar serviço', titulo: 'Serviço', campos: [
+  { k: 'tipo', l: 'Tipo', t: 'select', opts: SERVICOS_ATV },
+  { k: 'formato', l: 'Formato / descrição', ph: 'Ex.: página inteira 21×28 cm' },
+  { k: 'responsavel', l: 'Responsável pela execução', ph: 'Nome ou empresa' },
+  { k: 'email', l: 'E-mail para envio', t: 'email', ph: 'nome@empresa.com.br' },
+] };
 
 /* ================================================================
    Ícones
@@ -86,6 +95,7 @@ const P = {
   chevL: '<path d="m15 18-6-6 6-6"/>',
   chevR: '<path d="m9 18 6-6-6-6"/>',
   monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
   file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
 };
 const ic = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
@@ -142,7 +152,38 @@ const soDatas = (e) => {
 };
 const periodo = (e) => soDatas(e) + (horarioTexto(e) ? ' · ' + horarioTexto(e) : '');
 // Tipos padrão + tipos escritos à mão que já existem nos eventos
-const tiposDe = (evs) => [...TIPOS, ...uniq((evs || []).map((e) => e.tipo)).filter((t) => t && !TIPOS.includes(t))];
+const tiposDe = (evs, base = TIPOS) => [...base, ...uniq((evs || []).map((e) => e.tipo)).filter((t) => t && !base.includes(t))];
+
+// Compras do cliente nos últimos 3 anos (valor por ano) e quanto o investimento representa
+function comprasDe(d) {
+  const arr = Array.isArray(d?.compras) ? d.compras.filter((c) => c && typeof c === 'object') : [];
+  if (arr.length === 3) return arr.map((c) => ({ ano: Math.round(Number(c.ano)) || 0, valor: Math.max(0, Number(c.valor) || 0) }));
+  const y = new Date().getFullYear();
+  return [y - 3, y - 2, y - 1].map((ano) => ({ ano, valor: 0 }));
+}
+function analiseCompra(total, compras) {
+  const cs = (compras || []).filter((c) => Number(c.valor) > 0);
+  if (!cs.length) return null;
+  const ult = [...cs].sort((a, b) => b.ano - a.ano)[0];
+  const media = soma(cs, (c) => c.valor) / cs.length;
+  return { ultAno: ult.ano, ultValor: Number(ult.valor), pctUlt: (Number(total) || 0) / ult.valor * 100, media, pctMedia: (Number(total) || 0) / media * 100, n: cs.length };
+}
+const pctFmt = (p) => (Number(p) || 0).toLocaleString('pt-BR', { maximumFractionDigits: p < 10 ? 2 : 1 }) + '%';
+function compraTexto(total, compras) {
+  const a = analiseCompra(total, compras);
+  if (!a) return '';
+  return `${pctFmt(a.pctUlt)} das compras de ${a.ultAno} (${brl(a.ultValor)})` + (a.n > 1 ? ` · ${pctFmt(a.pctMedia)} da média de ${a.n} anos (${brl(a.media)})` : '');
+}
+const comprasLista = (compras) => (compras || []).filter((c) => Number(c.valor) > 0).map((c) => `${c.ano}: ${brl(c.valor)}`).join(' · ');
+
+// Serviços e gastos: quantidade × valor unitário = total
+function unitDe(it) {
+  if (it.unit !== undefined && it.unit !== null && it.unit !== '') return Math.max(0, Number(it.unit) || 0);
+  const q = Number(it.qt) || 0, v = Number(it.valor) || 0;
+  return q > 0 ? Math.round(v / q * 100) / 100 : v;
+}
+const totalItem = (unit, qt) => Math.round((Number(unit) || 0) * (qt === '' || qt == null ? 1 : Number(qt) || 0) * 100) / 100;
+const itemDesc = (x) => `${x.nome}${(x.qt || unitDe(x)) ? ` · ${x.qt || 1} × ${brl(unitDe(x))}` : ''}`;
 const clienteTexto = (c = {}) => [c.codigo && 'Cód. ' + c.codigo, c.nome].filter((x) => String(x || '').trim()).join(' · ');
 const clienteDe = (e) => e?.dados?.cliente || {};
 const temEntrega = (en) => !!en && ['destinatario', 'telefone', 'email', 'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'data', 'horario', 'obs'].some((k) => String(en[k] || '').trim());
@@ -180,6 +221,18 @@ function subtotais(d = {}) {
 const totalDe = (d) => Math.round(soma(Object.values(subtotais(d))) * 100) / 100;
 
 // Garante o formato esperado dos dados vindos do banco (proteção contra registros malformados)
+function sanearAtv(a) {
+  if (!a) return a;
+  const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x)) ? x : {};
+  const d = obj(a.dados);
+  a.dados = {
+    ...d, cliente: obj(d.cliente), contrato: obj(d.contrato), compras: comprasDe(d),
+    servicos: Array.isArray(d.servicos) ? d.servicos.filter((i) => i && typeof i === 'object' && !Array.isArray(i)) : [],
+    observacoes: typeof d.observacoes === 'string' ? d.observacoes : '',
+  };
+  return a;
+}
+
 function sanear(ev) {
   if (!ev) return ev;
   const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x)) ? x : {};
@@ -316,6 +369,31 @@ function SupaAPI() {
       const r = chk(await sb.from('eventos').delete().eq('id', id).select('id'));
       if (!r.length) throw new Error('permission denied');
     },
+    async listAtividades() {
+      const todos = [];
+      for (let de = 0; ; de += 1000) {
+        const pag = chk(await sb.from('atividades').select('*').order('numero', { ascending: false }).range(de, de + 999));
+        todos.push(...pag.map(sanearAtv));
+        if (pag.length < 1000) return todos;
+      }
+    },
+    async getAtividade(id) { return sanearAtv(chk(await sb.from('atividades').select('*').eq('id', id).maybeSingle())); },
+    async saveAtividade(a) {
+      const row = {
+        situacao: a.situacao, visibilidade: a.visibilidade === 'privado' ? 'privado' : 'todos', tipo: a.tipo, nome: a.nome, gerente: a.gerente || '',
+        data_inicio: a.data_inicio || null, data_fim: a.data_fim || null, dados: a.dados, valor_total: Number(a.dados?.contrato?.valor) || 0,
+      };
+      if (a.id) {
+        const r = chk(await sb.from('atividades').update(row).eq('id', a.id).select());
+        if (!r.length) throw new Error('permission denied');
+        return sanearAtv(r[0]);
+      }
+      return sanearAtv(chk(await sb.from('atividades').insert(row).select().single()));
+    },
+    async deleteAtividade(id) {
+      const r = chk(await sb.from('atividades').delete().eq('id', id).select('id'));
+      if (!r.length) throw new Error('permission denied');
+    },
     async listPerfis() { return chk(await sb.from('perfis').select('*').order('nome')); },
     async updatePerfil(id, patch) {
       const r = chk(await sb.from('perfis').update(patch).eq('id', id).select());
@@ -357,6 +435,8 @@ function DemoAPI() {
   let db = null;
   try { db = JSON.parse(store.get(KEY) || 'null'); } catch { db = null; }
   if (!db) db = semente();
+  db.atividades ||= [];
+  db.seqA ||= 0;
   let atual = store.get(KEY + '.user') || 'demo-admin';
   const salvar = () => store.set(KEY, JSON.stringify(db));
   const perfil = (id) => db.perfis.find((p) => p.id === id);
@@ -366,7 +446,8 @@ function DemoAPI() {
   const histVisivel = (h) => !h.evento_privado || h.evento_dono === atual || isAdmin();
   const anexosMem = {};
   const negar = () => { throw new Error('permission denied'); };
-  const log = (acao, ev, detalhes = {}) => db.historico.unshift({
+  const log = (acao, ev, detalhes = {}, tipo = 'evento') => db.historico.unshift({
+    tipo_registro: tipo,
     id: ++db.hseq, evento_id: ev.id, evento_numero: ev.numero, evento_nome: ev.nome, acao,
     usuario_id: atual, usuario_nome: perfil(atual)?.nome || '—', em: new Date().toISOString(), detalhes,
     evento_privado: ev.visibilidade === 'privado', evento_dono: ev.criado_por,
@@ -462,6 +543,40 @@ function DemoAPI() {
       log('excluiu', e, { valor_total: e.valor_total });
       salvar();
     },
+    async listAtividades() { return clone(db.atividades.filter(visivel)).sort((a, b) => b.numero - a.numero); },
+    async getAtividade(id) { const a = db.atividades.find((x) => x.id === id); return a && visivel(a) ? clone(a) : null; },
+    async saveAtividade(a) {
+      const agora = new Date().toISOString(), dados = clone(a.dados);
+      const campos = { situacao: a.situacao, visibilidade: a.visibilidade === 'privado' ? 'privado' : 'todos', tipo: a.tipo, nome: a.nome, gerente: a.gerente,
+        data_inicio: a.data_inicio || null, data_fim: a.data_fim || null, dados, valor_total: Math.max(0, Number(dados?.contrato?.valor) || 0) };
+      if (a.id) {
+        const i = db.atividades.findIndex((x) => x.id === a.id);
+        if (i < 0) throw new Error('Atividade não encontrada.');
+        const old = db.atividades[i];
+        if (!podeEditar(old)) negar();
+        const novo = { ...old, ...campos, atualizado_por: atual, atualizado_em: agora };
+        const det = {};
+        ['situacao', 'nome', 'tipo', 'gerente', 'data_inicio', 'data_fim', 'valor_total', 'visibilidade'].forEach((k) => { if ((old[k] ?? null) !== (novo[k] ?? null)) det[k] = [old[k] ?? null, novo[k] ?? null]; });
+        if (JSON.stringify(old.dados) !== JSON.stringify(novo.dados)) det.dados = true;
+        if (old.visibilidade !== novo.visibilidade) db.historico.forEach((h) => { if (h.evento_id === novo.id) h.evento_privado = novo.visibilidade === 'privado'; });
+        db.atividades[i] = novo;
+        if (Object.keys(det).length) log('alterou', novo, det, 'atividade');
+        salvar();
+        return clone(novo);
+      }
+      const novo = { id: uid(), numero: ++db.seqA, ...campos, criado_por: atual, criado_em: agora, atualizado_por: atual, atualizado_em: agora };
+      db.atividades.push(novo);
+      log('criou', novo, {}, 'atividade');
+      salvar();
+      return clone(novo);
+    },
+    async deleteAtividade(id) {
+      const a = db.atividades.find((x) => x.id === id);
+      if (!a || !podeEditar(a)) negar();
+      db.atividades = db.atividades.filter((x) => x.id !== id);
+      log('excluiu', a, { valor_total: a.valor_total }, 'atividade');
+      salvar();
+    },
     async listPerfis() { return clone(db.perfis).sort((a, b) => a.nome.localeCompare(b.nome)); },
     async updatePerfil(id, patch) {
       if (!isAdmin()) negar();
@@ -477,13 +592,13 @@ function DemoAPI() {
     async adminSenha() { if (!isAdmin()) negar(); },
     async listarAnexos(id) { return (anexosMem[id] || []).slice(); },
     async enviarAnexo(id, arquivo, nome) {
-      const ev = db.eventos.find((x) => x.id === id);
+      const ev = db.eventos.find((x) => x.id === id) || db.atividades.find((x) => x.id === id);
       if (!ev || !podeEditar(ev)) negar();
       const n = `${Date.now()}-${nome}`;
       (anexosMem[id] ||= []).push({ path: `${id}/${n}`, nome: n, tipo: arquivo.type, tamanho: arquivo.size, criado_em: new Date().toISOString(), url: URL.createObjectURL(arquivo) });
     },
     async excluirAnexo(path) {
-      const id = path.split('/')[0], ev = db.eventos.find((x) => x.id === id);
+      const id = path.split('/')[0], ev = db.eventos.find((x) => x.id === id) || db.atividades.find((x) => x.id === id);
       if (ev && !podeEditar(ev)) negar();
       anexosMem[id] = (anexosMem[id] || []).filter((a) => a.path !== path);
     },
@@ -496,7 +611,7 @@ function DemoAPI() {
    Estado e inicialização
    ================================================================ */
 let api;
-const S = { me: null, perfis: [], eventos: [], dirty: false, recovery: false, filtros: { q: '', sit: '', tipo: '', gerente: '', meus: false }, anoPainel: String(new Date().getFullYear()) };
+const S = { me: null, perfis: [], eventos: [], atividades: [], filtrosAtv: { q: '', sit: '', tipo: '', meus: false }, dirty: false, recovery: false, filtros: { q: '', sit: '', tipo: '', gerente: '', meus: false }, anoPainel: String(new Date().getFullYear()) };
 const root = $('#root');
 const isAdmin = () => S.me?.papel === 'admin';
 const podeEditar = (ev) => !!S.me && (isAdmin() || ev.criado_por === S.me.id);
@@ -693,6 +808,8 @@ function renderShell() {
         <a href="#/painel" data-r="painel">${ic('grid')}Painel</a>
         <a href="#/eventos" data-r="eventos">${ic('calendar')}Eventos</a>
         <a href="#/eventos/novo" data-r="novo">${ic('plus')}Novo evento</a>
+        <a href="#/atividades" data-r="atividades">${ic('megaphone')}Atividades</a>
+        <a href="#/atividades/nova" data-r="nova-atv">${ic('plus')}Nova atividade</a>
         <a href="#/relatorios" data-r="relatorios">${ic('chart')}Relatórios</a>
         <a href="#/historico" data-r="historico">${ic('clock')}Histórico</a>
         ${isAdmin() ? `<div class="grp">Administração</div><a href="#/usuarios" data-r="usuarios">${ic('users')}Usuários<span class="badge ${pend ? '' : 'hidden'}" id="pendBadge">${pend}</span></a>` : ''}
@@ -774,6 +891,11 @@ const ROTAS = [
   [/^#\/eventos\/([\w-]+)\/editar$/, 'eventos', (m) => viewForm(m[1])],
   [/^#\/eventos\/([\w-]+)\/duplicar$/, 'novo', (m) => viewForm(m[1], true)],
   [/^#\/eventos\/([\w-]+)$/, 'eventos', (m) => viewDetalhe(m[1])],
+  [/^#\/atividades$/, 'atividades', () => viewAtividades()],
+  [/^#\/atividades\/nova$/, 'nova-atv', () => viewForm(null, false, 'atividade')],
+  [/^#\/atividades\/([\w-]+)\/editar$/, 'atividades', (m) => viewForm(m[1], false, 'atividade')],
+  [/^#\/atividades\/([\w-]+)\/duplicar$/, 'nova-atv', (m) => viewForm(m[1], true, 'atividade')],
+  [/^#\/atividades\/([\w-]+)$/, 'atividades', (m) => viewDetalheAtv(m[1])],
   [/^#\/relatorios$/, 'relatorios', () => viewRelatorios()],
   [/^#\/historico$/, 'historico', () => viewHistorico()],
   [/^#\/usuarios$/, 'usuarios', () => viewUsuarios()],
@@ -964,12 +1086,14 @@ async function viewEventos() {
   desenhar();
 }
 
-async function excluirEvento(ev, depois) {
-  const ok = await confirmar(`Excluir o evento Nº ${pad(ev.numero)}?`, `"${ev.nome}" será removido para todos os usuários. A exclusão fica registrada no histórico e não pode ser desfeita.`, { danger: true, icon: 'trash', ok: 'Excluir evento' });
+async function excluirEvento(ev, depois, kind = 'evento') {
+  const A = kind === 'atividade';
+  const ok = await confirmar(`Excluir ${A ? 'a atividade' : 'o evento'} Nº ${pad(ev.numero)}?`, `"${ev.nome}" será removid${A ? 'a' : 'o'} para todos os usuários, junto com as fotos e arquivos. A exclusão fica registrada no histórico e não pode ser desfeita.`, { danger: true, icon: 'trash', ok: A ? 'Excluir atividade' : 'Excluir evento' });
   if (!ok) return;
   try {
     try { await api.limparAnexos(ev.id); } catch { /* sem arquivos ou sem acesso ao armazenamento */ }
-    await api.deleteEvento(ev.id); toast('Evento excluído'); depois();
+    await (A ? api.deleteAtividade(ev.id) : api.deleteEvento(ev.id));
+    toast(A ? 'Atividade excluída' : 'Evento excluído'); depois();
   }
   catch (e) { toast(msgErro(e), 'err'); }
 }
@@ -982,8 +1106,8 @@ function linhasEvento(e) {
   const ce = d.contratoEvento || {}, mo = d.montadora || {};
   if (ce.valor || ce.data || ce.area) L.push(['Contrato do evento', [ce.data && 'Aprovação ' + fdate(ce.data), ce.area && ce.area + ' m²'].filter(Boolean).join(' · '), ce.valor]);
   if (mo.valor || mo.nome) L.push(['Montadora', [mo.nome, mo.data && fdate(mo.data)].filter(Boolean).join(' · '), mo.valor]);
-  (d.servicos || []).filter((s) => s.qt || s.valor).forEach((s) => L.push(['Serviço', `${s.nome}${s.qt ? ' · qtde ' + s.qt : ''}`, s.valor]));
-  (d.gastos || []).filter((g) => g.qt || g.valor || g.obs).forEach((g) => L.push(['Gasto diverso', `${g.nome}${g.qt ? ' · qtde ' + g.qt : ''}${g.obs ? ' · ' + g.obs : ''}`, g.valor]));
+  (d.servicos || []).filter((s) => s.qt || s.valor).forEach((s) => L.push(['Serviço', itemDesc(s), s.valor]));
+  (d.gastos || []).filter((g) => g.qt || g.valor || g.obs).forEach((g) => L.push(['Gasto diverso', `${itemDesc(g)}${g.obs ? ' · ' + g.obs : ''}`, g.valor]));
   (d.hospedagem || []).forEach((h) => L.push(['Hospedagem', [h.nome, h.hotel, (h.chegada || h.saida) && `${fdate(h.chegada)} a ${fdate(h.saida)}`, h.codigo && 'Reserva ' + h.codigo].filter(Boolean).join(' · '), h.valor]));
   (d.alimentacao || []).forEach((a) => L.push(['Alimentação', [fdate(a.data), a.local, a.obs].filter(Boolean).join(' · '), a.valor]));
   (d.passagens || []).forEach((p) => L.push(['Passagem', [p.quem, p.meio, (p.origem || p.destino) && `${p.origem || '?'} → ${p.destino || '?'}`, p.data && fdate(p.data) + (p.hora ? ' ' + p.hora : ''), p.codigo && 'Reserva ' + p.codigo].filter(Boolean).join(' · '), p.valor]));
@@ -993,7 +1117,8 @@ function linhasEvento(e) {
 function textoEvento(e) {
   return `*Nº ${pad(e.numero)} — ${e.nome}*\n${clienteTexto(clienteDe(e)) ? 'Cliente: ' + clienteTexto(clienteDe(e)) + '\n' : ''}${SIT[e.situacao]?.label} · ${e.tipo}\n${periodo(e)}${e.local ? ' · ' + e.local : ''}\nGerente: ${e.gerente || '—'}\n` +
     (temEntrega(e.dados?.entrega) ? `Entrega: ${entregaTexto(e.dados.entrega)}\n` : '') +
-    linhasEvento(e).map(([g, d, v]) => `• ${g}${d ? ': ' + d : ''} — ${brl(v)}`).join('\n') + `\n*Total: ${brl(e.valor_total)}*`;
+    linhasEvento(e).map(([g, d, v]) => `• ${g}${d ? ': ' + d : ''} — ${brl(v)}`).join('\n') +
+    (compraTexto(e.valor_total, e.dados?.compras) ? `\nRepresenta ${compraTexto(e.valor_total, e.dados.compras)}` : '') + `\n*Total: ${brl(e.valor_total)}*`;
 }
 
 /* Ficha de impressão: só o que foi preenchido, compacta para caber em uma página */
@@ -1011,7 +1136,7 @@ function fichaHtml(e) {
     ...(mo.valor || mo.nome ? [[`Montadora${mo.nome ? ': ' + esc(mo.nome) : ''}${mo.data ? ' · ' + fdate(mo.data) : ''}`, brl(mo.valor)]] : []),
   ]);
   const itens = (arr, comObs) => linhas((arr || []).filter((x) => x.qt || x.valor || x.obs).map((x) => [
-    `${esc(x.nome)}${x.qt ? ` <i>× ${esc(x.qt)}</i>` : ''}${comObs && x.obs ? ` <i>— ${esc(x.obs)}</i>` : ''}`, brl(x.valor)]));
+    `${esc(x.nome)} <i>${esc(x.qt || 1)} × ${brl(unitDe(x))}</i>${comObs && x.obs ? ` <i>— ${esc(x.obs)}</i>` : ''}`, brl(x.valor)]));
   const hosp = linhas((d.hospedagem || []).map((h) => [junta(h.nome, h.hotel, (h.chegada || h.saida) && `${fdate(h.chegada)} a ${fdate(h.saida)}`, h.codigo && 'Res. ' + h.codigo, [h.telefone, h.email].filter(Boolean).join(' ')), brl(h.valor)]));
   const alim = linhas((d.alimentacao || []).map((a) => [junta(fdate(a.data), a.local, a.obs), brl(a.valor)]));
   const pass = linhas((d.passagens || []).map((x) => [junta(x.quem, x.meio, (x.origem || x.destino) && `${x.origem || '?'} → ${x.destino || '?'}`, x.data && fdate(x.data) + (x.hora ? ' ' + x.hora : ''), x.codigo && 'Res. ' + x.codigo), brl(x.valor)]));
@@ -1024,7 +1149,8 @@ function fichaHtml(e) {
     <header class="f-top"><img src="assets/logo-dello.png" alt="Dello">
       <div class="f-tit"><small>Ficha do evento Nº ${pad(e.numero)}${e.visibilidade === 'privado' ? ' · Privado' : ''}</small><h2>${esc(e.nome)}</h2>
         <div>${junta(e.tipo, periodo(e), e.local)}</div>
-        ${clienteTexto(cli) || e.gerente ? `<div>${junta(clienteTexto(cli) && 'Cliente: ' + clienteTexto(cli), e.gerente && 'Gerente: ' + e.gerente)}</div>` : ''}</div>
+        ${clienteTexto(cli) || e.gerente ? `<div>${junta(clienteTexto(cli) && 'Cliente: ' + clienteTexto(cli), e.gerente && 'Gerente: ' + e.gerente)}</div>` : ''}
+        ${comprasLista(d.compras) ? `<div>Compras: ${esc(comprasLista(d.compras))}${compraTexto(e.valor_total, d.compras) ? ` → <b>${esc(compraTexto(e.valor_total, d.compras))}</b>` : ''}</div>` : ''}</div>
       <div class="f-tot"><span class="pill ${SIT[e.situacao]?.cor || 'gray'}">${SIT[e.situacao]?.label || ''}</span><small>Total do investimento</small><b>${brl(e.valor_total)}</b></div>
     </header>
     <div class="f-cols">
@@ -1072,7 +1198,8 @@ async function viewDetalhe(id) {
         <div class="grow">${pill(e.situacao)} <span class="tag brand">${esc(e.tipo)}</span>${e.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado · só quem criou e administradores veem</span>` : ''}
           <h2>${esc(e.nome)}</h2>
           ${clienteTexto(d.cliente) ? `<div style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink-2);margin-bottom:2px">${ic('user')}Cliente: ${esc(clienteTexto(d.cliente))}</div>` : ''}
-          <div class="muted" style="display:flex;align-items:center;gap:6px">${ic('pin')}${esc(e.local || 'Local a definir')}</div></div>
+          <div class="muted" style="display:flex;align-items:center;gap:6px">${ic('pin')}${esc(e.local || 'Local a definir')}</div>
+          ${comprasLista(d.compras) ? `<div class="pct-info" style="margin-top:6px">${ic('trend')}<span>Compras do cliente: ${esc(comprasLista(d.compras))}${compraTexto(e.valor_total, d.compras) ? ` — o investimento representa <b>${esc(compraTexto(e.valor_total, d.compras))}</b>` : ''}</span></div>` : ''}</div>
         <div class="total-box"><span>Valor total de investimento</span><b>${brl(e.valor_total)}</b></div>
       </div>
       <div class="facts">
@@ -1101,9 +1228,9 @@ async function viewDetalhe(id) {
         <div class="grid g3"><div><div class="lbl">Data</div>${fdate(mo.data) || '—'}</div><div><div class="lbl">Montadora</div>${esc(mo.nome || '—')}</div><div><div class="lbl">Valor</div>${brl(mo.valor)}</div></div>
       </div>
       <div class="card"><div class="card-h"><h3>Serviços contratados</h3></div>
-        ${tabela([['Item'], ['Qtde', 'r'], ['Valor', 'r']], (d.servicos || []).filter((s) => s.qt || s.valor).map((s) => [esc(s.nome), esc(s.qt || '—'), brl(s.valor)]), st.servicos)}</div>
+        ${tabela([['Item'], ['Qtde', 'r'], ['Unitário', 'r'], ['Total', 'r']], (d.servicos || []).filter((s) => s.qt || s.valor).map((s) => [esc(s.nome), esc(s.qt || 1), brl(unitDe(s)), brl(s.valor)]), st.servicos)}</div>
       <div class="card"><div class="card-h"><h3>Gastos diversos</h3></div>
-        ${tabela([['Item'], ['Qtde', 'r'], ['Obs.'], ['Valor', 'r']], (d.gastos || []).filter((g) => g.qt || g.valor || g.obs).map((g) => [esc(g.nome), esc(g.qt || '—'), esc(g.obs || ''), brl(g.valor)]), st.gastos)}</div>
+        ${tabela([['Item'], ['Qtde', 'r'], ['Unitário', 'r'], ['Obs.'], ['Total', 'r']], (d.gastos || []).filter((g) => g.qt || g.valor || g.obs).map((g) => [esc(g.nome), esc(g.qt || 1), brl(unitDe(g)), esc(g.obs || ''), brl(g.valor)]), st.gastos)}</div>
       <div class="card full"><div class="card-h"><h3>Envolvidos</h3></div>
         ${(d.envolvidos || []).length ? `<div class="people">${d.envolvidos.map((n) => `<span class="person"><span class="avatar sm">${esc(iniciais(n))}</span>${esc(n)}</span>`).join('')}</div>` : '<p class="muted small" style="margin:0">Nenhum envolvido informado.</p>'}</div>
       <div class="card full"><div class="card-h"><h3>Hospedagem</h3></div><div style="overflow-x:auto">
@@ -1296,6 +1423,9 @@ function abrirGaleria(imgs, inicio) {
 function novoEvento() {
   return { id: null, numero: null, situacao: 'analise', visibilidade: 'todos', tipo: TIPOS[0], data_inicio: '', data_fim: '', nome: '', local: '', gerente: S.me?.nome || '', dados: {} };
 }
+function novaAtividade() {
+  return { id: null, numero: null, situacao: 'analise', visibilidade: 'todos', tipo: TIPOS_ATV[0], data_inicio: '', data_fim: '', nome: '', gerente: S.me?.nome || '', dados: {} };
+}
 function normalizarDados(d = {}) {
   const fx = (lista, salvos = []) => [
     ...lista.map((n) => ({ qt: '', valor: '', obs: '', ...(salvos.find((s) => s.nome === n && s.fixo !== false) || {}), nome: n, fixo: true })),
@@ -1305,6 +1435,7 @@ function normalizarDados(d = {}) {
     contratoEvento: { data: '', area: '', valor: '', ...(d.contratoEvento || {}) },
     montadora: { data: '', nome: '', valor: '', ...(d.montadora || {}) },
     cliente: { codigo: '', nome: '', ...(d.cliente || {}) },
+    compras: comprasDe(d),
     hora_inicio: typeof d.hora_inicio === 'string' ? d.hora_inicio : '',
     hora_fim: typeof d.hora_fim === 'string' ? d.hora_fim : '',
     entrega: { destinatario: '', telefone: '', email: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '', ...(d.entrega || {}) },
@@ -1314,10 +1445,19 @@ function normalizarDados(d = {}) {
     observacoes: d.observacoes || '',
   };
 }
+function normalizarAtv(d = {}) {
+  return {
+    cliente: { codigo: '', nome: '', ...(d.cliente || {}) },
+    compras: comprasDe(d),
+    contrato: { data: '', tipo: '', valor: '', ...(d.contrato || {}) },
+    servicos: Array.isArray(d.servicos) ? d.servicos.filter((x) => x && typeof x === 'object') : [],
+    observacoes: d.observacoes || '',
+  };
+}
 
 function campoRep(c, v) {
   let inp;
-  if (c.t === 'select') inp = `<select data-k="${c.k}">${[...c.opts, ...(v && !c.opts.includes(v) ? [v] : [])].map((o) => `<option ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  if (c.t === 'select') inp = `<select data-k="${c.k}">${[...c.opts, ...(v && !c.opts.includes(v) ? [v] : [])].map((o) => `<option value="${esc(o)}" ${v === o ? 'selected' : ''}>${o ? esc(o) : 'Selecione…'}</option>`).join('')}</select>`;
   else if (c.t === 'money') inp = `<div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-k="${c.k}" value="${fmtNum(v)}" placeholder="0,00" autocomplete="off"></div>`;
   else inp = `<input type="${c.t || 'text'}" data-k="${c.k}" value="${esc(v ?? '')}" ${c.list ? `list="${c.list}"` : ''} placeholder="${esc(c.ph || '')}" maxlength="200" autocomplete="off">`;
   if (!c.l) return inp;
@@ -1335,88 +1475,113 @@ function repHtml(tipo, obj = {}, n = 1) {
 }
 function itemHtml(grupo, it) {
   const obs = grupo === 'gastos';
-  const cheio = it.qt || it.valor;
+  const u = unitDe(it);
+  const cheio = it.qt || u;
   return `<tr data-item ${it.fixo ? `data-fixo="1" data-nome="${esc(it.nome)}"` : ''} class="${cheio ? 'has' : ''}">
     <td class="it">${it.fixo ? esc(it.nome) : `<input data-k="nome" value="${esc(it.nome)}" placeholder="Descrição do item" maxlength="120" style="min-width:150px">`}</td>
     <td class="q"><input type="number" min="0" step="1" inputmode="numeric" data-k="qt" value="${esc(it.qt ?? '')}" placeholder="0"></td>
-    <td class="v"><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-k="valor" value="${fmtNum(it.valor)}" placeholder="0,00" autocomplete="off"></div></td>
+    <td class="v"><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-k="unit" value="${fmtNum(u)}" placeholder="0,00" autocomplete="off"></div></td>
+    <td class="t num" data-tot>${cheio ? brl(it.valor) : '—'}</td>
     ${obs ? `<td class="o"><input data-k="obs" value="${esc(it.obs || '')}" placeholder="Observação" maxlength="300"></td>` : ''}
     <td class="x">${it.fixo ? '' : `<button type="button" class="btn btn-ghost icon-btn" data-rm-item title="Remover" aria-label="Remover">${ic('x')}</button>`}</td></tr>`;
 }
+const comprasHtml = (compras) => `${compras.map((c, i) => `<div class="field"><label for="f-cp-${i}">Compras em ${c.ano}</label><div class="prefix"><span>R$</span><input id="f-cp-${i}" data-ano="${c.ano}" class="money" inputmode="decimal" value="${fmtNum(c.valor)}" placeholder="0,00"></div></div>`).join('')}
+  <div class="span-all pct-info" id="pctInfo"></div>`;
 
-async function viewForm(id, duplicar = false) {
+async function viewForm(id, duplicar = false, kind = 'evento') {
+  const A = kind === 'atividade';
+  const K = A ? { rota: 'atividades', sing: 'atividade', Sing: 'Atividade', o: 'a', este: 'esta atividade', nova: 'Nova atividade' }
+    : { rota: 'eventos', sing: 'evento', Sing: 'Evento', o: 'o', este: 'este evento', nova: 'Novo evento' };
   carregando();
   let ev;
   if (id) {
-    ev = await api.getEvento(id);
-    if (!ev) { location.hash = '#/eventos'; toast('Evento não encontrado', 'err'); return; }
+    ev = await (A ? api.getAtividade(id) : api.getEvento(id));
+    if (!ev) { location.hash = '#/' + K.rota; toast(`${K.Sing} não encontrad${K.o}`, 'err'); return; }
     if (duplicar) ev = { ...clone(ev), id: null, numero: null, nome: ev.nome + ' (cópia)', situacao: 'analise', criado_por: null };
-    else if (!podeEditar(ev)) { toast('Você só pode editar eventos que você criou.', 'err'); location.hash = '#/eventos/' + id; return; }
-  } else ev = novoEvento();
+    else if (!podeEditar(ev)) { toast(`Você só pode editar ${K.sing}s que você criou.`, 'err'); location.hash = `#/${K.rota}/${id}`; return; }
+  } else ev = A ? novaAtividade() : novoEvento();
   const novo = !ev.id;
-  const d = normalizarDados(ev.dados);
+  const d = A ? normalizarAtv(ev.dados) : normalizarDados(ev.dados);
   if (!S.eventos.length) { try { S.eventos = await api.listEventos(); } catch { /* sugestões são opcionais */ } }
-  const sugGerentes = uniq([...S.perfis.filter((p) => p.ativo).map((p) => p.nome), ...S.eventos.map((e) => e.gerente)]);
+  if (!S.atividades.length) { try { S.atividades = await api.listAtividades(); } catch { /* sugestões são opcionais */ } }
+  const mesmos = A ? S.atividades : S.eventos, base = A ? TIPOS_ATV : TIPOS;
+  const sugGerentes = uniq([...S.perfis.filter((p) => p.ativo).map((p) => p.nome), ...S.eventos.map((e) => e.gerente), ...S.atividades.map((e) => e.gerente)]);
   const sugLocais = uniq(S.eventos.map((e) => e.local));
-  // clientes já usados (código → nome), para sugerir e completar
+  // clientes já usados (código → nome), em eventos e atividades
   const clientesAnt = [];
-  S.eventos.forEach((e) => { const c = clienteDe(e); if (c.codigo && !clientesAnt.some((x) => x.codigo === c.codigo)) clientesAnt.push({ codigo: String(c.codigo), nome: String(c.nome || '') }); });
+  [...S.eventos, ...S.atividades].forEach((e) => { const c = clienteDe(e); if (c.codigo && !clientesAnt.some((x) => x.codigo === c.codigo)) clientesAnt.push({ codigo: String(c.codigo), nome: String(c.nome || '') }); });
+  const cats = A ? [['contrato', 'Contrato']] : CATS;
+  const voltar = novo ? '#/' + K.rota : `#/${K.rota}/${ev.id}`;
 
-  setPage(novo ? (duplicar ? 'Duplicar evento' : 'Novo evento') : `Editar evento Nº ${pad(ev.numero)}`,
+  setPage(novo ? (duplicar ? `Duplicar ${K.sing}` : K.nova) : `Editar ${K.sing} Nº ${pad(ev.numero)}`,
     novo ? 'Preencha as informações. O número é gerado automaticamente ao salvar.' : esc(ev.nome),
-    `<a class="btn" href="${novo ? '#/eventos' : '#/eventos/' + ev.id}">Cancelar</a><button class="btn btn-primary" type="submit" form="frm">${ic('save')}Salvar</button>`);
+    `<a class="btn" href="${voltar}">Cancelar</a><button class="btn btn-primary" type="submit" form="frm">${ic('save')}Salvar</button>`);
   $('#shell').classList.add('has-savebar');
 
   const secH = (n, t, p, stId) => `<div class="sec-h"><span class="sec-n">${n}</span><div><h2>${t}</h2>${p ? `<p>${p}</p>` : ''}</div><span class="sp"></span>${stId ? `<span class="sub-total" id="st-${stId}"></span>` : ''}</div>`;
   const reps = (tipo, lista) => `<div class="reps" id="rp-${tipo}">${(lista.length ? lista : [{}]).map((o, i) => repHtml(tipo, o, i + 1)).join('')}</div>
     <button type="button" class="btn add-row" data-add="${tipo}">${ic('plus')}${REP[tipo].add}</button>`;
   const hintEnter = `<div class="kbd-hint">${ic('info')}<span><kbd>Enter</kbd> no último campo abre uma nova linha · <kbd>Enter</kbd> numa linha vazia pula para a próxima seção</span></div>`;
+  const tabItens = (g, obs) => `<table class="items" id="it-${g}"><thead><tr><th>Item</th><th>Qtde</th><th>Valor unitário</th><th class="t">Total</th>${obs ? '<th class="o">Observação</th>' : ''}<th></th></tr></thead><tbody>${d[g].map((x) => itemHtml(g, x)).join('')}</tbody></table>`;
 
-  view().innerHTML = `<form id="frm" novalidate autocomplete="off"><div class="form-layout">
-    <div class="form-main">
-      <section class="card">
-        ${secH(1, 'Dados do evento', 'Informações que aparecem no resumo e nos relatórios')}
+  const secDados = `<section class="card">
+        ${secH(1, `Dados d${K.o} ${K.sing}`, 'Informações que aparecem no resumo e nos relatórios')}
         <div class="lbl">Situação</div>
         <div class="seg" id="seg" style="margin-bottom:18px">${SIT_ORDEM.map((s) => `<label class="${SIT[s].cor} ${ev.situacao === s ? 'on' : ''}"><input type="radio" name="sit" value="${s}" ${ev.situacao === s ? 'checked' : ''}><span class="d"></span><span><b>${SIT[s].label}</b><small>${SIT[s].cx}</small></span></label>`).join('')}</div>
-        ${novo || ev.criado_por === S.me.id ? `<div class="lbl">Quem pode ver este evento</div>
+        ${novo || ev.criado_por === S.me.id ? `<div class="lbl">Quem pode ver ${K.este}</div>
         <div class="seg seg2" id="segVis" style="margin-bottom:18px">
           <label class="vis ${ev.visibilidade !== 'privado' ? 'on' : ''}"><input type="radio" name="vis" value="todos" ${ev.visibilidade !== 'privado' ? 'checked' : ''}>${ic('users')}<span><b>Para todos</b><small>Todos os usuários aprovados veem</small></span></label>
           <label class="vis ${ev.visibilidade === 'privado' ? 'on' : ''}"><input type="radio" name="vis" value="privado" ${ev.visibilidade === 'privado' ? 'checked' : ''}>${ic('lock')}<span><b>Privado</b><small>Só você e os administradores veem</small></span></label>
         </div>` : ''}
         <div class="grid g3">
-          <div class="field span2"><label for="f-nome">Nome do evento <span class="req">*</span></label><input id="f-nome" value="${esc(ev.nome)}" placeholder="Ex.: Feira Escolar 2027" maxlength="160"></div>
-          <div class="field"><label for="f-tipo">Tipo de evento</label>
-            <select id="f-tipo">${tiposDe([...S.eventos, ev]).map((t) => `<option ${ev.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="${OUTRO_TIPO}">Outro (escrever)…</option></select>
-            <input id="f-tipo-outro" class="hidden" style="margin-top:8px" maxlength="60" placeholder="Escreva o tipo do evento" list="dl-tipos"></div>
+          <div class="field span2"><label for="f-nome">Nome d${K.o} ${K.sing} <span class="req">*</span></label><input id="f-nome" value="${esc(ev.nome)}" placeholder="${A ? 'Ex.: Anúncio revista Volta às Aulas' : 'Ex.: Feira Escolar 2027'}" maxlength="160"></div>
+          <div class="field"><label for="f-tipo">Tipo de ${K.sing}</label>
+            <select id="f-tipo">${tiposDe([...mesmos, ev], base).map((t) => `<option ${ev.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="${OUTRO_TIPO}">Outro (escrever)…</option></select>
+            <input id="f-tipo-outro" class="hidden" style="margin-top:8px" maxlength="60" placeholder="Escreva o tipo" list="dl-tipos"></div>
           <div class="field"><label for="f-cli-cod">Cód. do cliente</label><input id="f-cli-cod" value="${esc(d.cliente.codigo)}" maxlength="30" placeholder="Ex.: 10234" list="dl-cli-cod"></div>
-          <div class="field span2"><label for="f-cli-nome">Nome do cliente (quem promove o evento)</label><input id="f-cli-nome" value="${esc(d.cliente.nome)}" maxlength="150" placeholder="Razão social ou nome fantasia" list="dl-cli-nome"></div>
+          <div class="field span2"><label for="f-cli-nome">Nome do cliente (quem promove ${A ? 'a atividade' : 'o evento'})</label><input id="f-cli-nome" value="${esc(d.cliente.nome)}" maxlength="150" placeholder="Razão social ou nome fantasia" list="dl-cli-nome"></div>
+          ${comprasHtml(d.compras)}
           <div class="field"><label for="f-inicio">Data de início</label><input id="f-inicio" type="date" value="${esc(ev.data_inicio || '')}"></div>
           <div class="field"><label for="f-fim">Data de término</label><input id="f-fim" type="date" value="${esc(ev.data_fim || '')}"></div>
           <div class="field"><label for="f-gerente">Gerente responsável</label><input id="f-gerente" list="dl-ger" value="${esc(ev.gerente)}" placeholder="Nome do gerente" maxlength="150"></div>
-          <div class="span-all local-hora">
+          ${A ? '' : `<div class="span-all local-hora">
             <div class="field"><label for="f-local">Local do evento</label><input id="f-local" list="dl-loc" value="${esc(ev.local)}" placeholder="Pavilhão, cidade/UF" maxlength="300"></div>
             <div class="field"><label for="f-hini">Horário de início</label><input id="f-hini" type="time" value="${esc(hora(d.hora_inicio))}"></div>
             <div class="field"><label for="f-hfim">Horário de término</label><input id="f-hfim" type="time" value="${esc(hora(d.hora_fim))}"></div>
-          </div>
+          </div>`}
         </div>
-      </section>
+      </section>`;
 
+  const secObs = (n) => `<section class="card">
+        ${secH(n, 'Observações', `Informações adicionais sobre ${K.este}`)}
+        <textarea id="f-obs" placeholder="Opcional" maxlength="5000">${esc(d.observacoes)}</textarea>
+      </section>`;
+  const secArq = (n) => `<section class="card" id="anxCard">
+        ${secH(n, 'Fotos e arquivos', `${A ? 'Artes, provas, vídeos em PDF, contratos…' : 'Fotos do estande, projeto, contratos…'} JPG, PNG, WEBP, GIF ou PDF, até 10 MB`)}
+        ${novo ? '' : `<div class="sub-h" style="margin-top:0">Já anexados <span class="muted small" id="anxCount"></span></div><div id="anxBox"></div><div class="sub-h">Adicionar novos</div>`}
+        <div id="anxPend"></div>
+        <label class="btn add-row" for="anxInput" style="margin-top:0">${ic('upload')}Escolher fotos ou arquivos</label>
+        <input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">
+        <div class="kbd-hint">${ic('info')}<span>Os arquivos escolhidos são enviados quando você clicar em <b>Salvar</b>. No computador, também dá para arrastar para cá.</span></div>
+      </section>`;
+
+  const secoesEvento = `
       <section class="card">
         ${secH(2, 'Endereço de entrega', 'Para onde enviar produtos, amostras e materiais do evento')}
         <div class="grid g4">
-          <div class="field"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
-          <div class="field"><label for="f-en-tel">Telefone</label><input id="f-en-tel" type="tel" value="${esc(d.entrega.telefone)}" maxlength="40" placeholder="(00) 00000-0000"></div>
-          <div class="field"><label for="f-en-email">E-mail do cliente</label><input id="f-en-email" type="email" value="${esc(d.entrega.email)}" maxlength="200" placeholder="nome@empresa.com.br"></div>
-          <div class="field"><label for="f-en-cep">CEP</label><input id="f-en-cep" inputmode="numeric" value="${esc(d.entrega.cep)}" maxlength="9" placeholder="00000-000"><div class="hint" id="cepMsg">Preenche o endereço sozinho</div></div>
-          <div class="field span2"><label for="f-en-rua">Endereço</label><input id="f-en-rua" value="${esc(d.entrega.rua)}" maxlength="200" placeholder="Rua, avenida…"></div>
-          <div class="field"><label for="f-en-num">Número</label><input id="f-en-num" value="${esc(d.entrega.numero)}" maxlength="20"></div>
-          <div class="field"><label for="f-en-comp">Complemento</label><input id="f-en-comp" value="${esc(d.entrega.complemento)}" maxlength="120" placeholder="Pavilhão, estande, sala…"></div>
-          <div class="field"><label for="f-en-bairro">Bairro</label><input id="f-en-bairro" value="${esc(d.entrega.bairro)}" maxlength="100"></div>
-          <div class="field"><label for="f-en-cidade">Cidade</label><input id="f-en-cidade" value="${esc(d.entrega.cidade)}" maxlength="100"></div>
-          <div class="field"><label for="f-en-uf">UF</label><select id="f-en-uf"><option value=""></option>${UFS.map((u) => `<option ${d.entrega.uf === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
-          <div class="field"><label for="f-en-data">Data de entrega</label><input id="f-en-data" type="date" value="${esc(d.entrega.data)}"></div>
-          <div class="field"><label for="f-en-hora">Horário de recebimento</label><input id="f-en-hora" value="${esc(d.entrega.horario)}" maxlength="60" placeholder="Ex.: 8h às 17h"></div>
-          <div class="field span3"><label for="f-en-obs">Observações da entrega</label><input id="f-en-obs" value="${esc(d.entrega.obs)}" maxlength="300" placeholder="Doca, portão de carga, agendamento, nota fiscal…"></div>
+          <div class="field"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega?.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
+          <div class="field"><label for="f-en-tel">Telefone</label><input id="f-en-tel" type="tel" value="${esc(d.entrega?.telefone)}" maxlength="40" placeholder="(00) 00000-0000"></div>
+          <div class="field"><label for="f-en-email">E-mail do cliente</label><input id="f-en-email" type="email" value="${esc(d.entrega?.email)}" maxlength="200" placeholder="nome@empresa.com.br"></div>
+          <div class="field"><label for="f-en-cep">CEP</label><input id="f-en-cep" inputmode="numeric" value="${esc(d.entrega?.cep)}" maxlength="9" placeholder="00000-000"><div class="hint" id="cepMsg">Preenche o endereço sozinho</div></div>
+          <div class="field span2"><label for="f-en-rua">Endereço</label><input id="f-en-rua" value="${esc(d.entrega?.rua)}" maxlength="200" placeholder="Rua, avenida…"></div>
+          <div class="field"><label for="f-en-num">Número</label><input id="f-en-num" value="${esc(d.entrega?.numero)}" maxlength="20"></div>
+          <div class="field"><label for="f-en-comp">Complemento</label><input id="f-en-comp" value="${esc(d.entrega?.complemento)}" maxlength="120" placeholder="Pavilhão, estande, sala…"></div>
+          <div class="field"><label for="f-en-bairro">Bairro</label><input id="f-en-bairro" value="${esc(d.entrega?.bairro)}" maxlength="100"></div>
+          <div class="field"><label for="f-en-cidade">Cidade</label><input id="f-en-cidade" value="${esc(d.entrega?.cidade)}" maxlength="100"></div>
+          <div class="field"><label for="f-en-uf">UF</label><select id="f-en-uf"><option value=""></option>${UFS.map((u) => `<option ${d.entrega?.uf === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+          <div class="field"><label for="f-en-data">Data de entrega</label><input id="f-en-data" type="date" value="${esc(d.entrega?.data)}"></div>
+          <div class="field"><label for="f-en-hora">Horário de recebimento</label><input id="f-en-hora" value="${esc(d.entrega?.horario)}" maxlength="60" placeholder="Ex.: 8h às 17h"></div>
+          <div class="field span3"><label for="f-en-obs">Observações da entrega</label><input id="f-en-obs" value="${esc(d.entrega?.obs)}" maxlength="300" placeholder="Doca, portão de carga, agendamento, nota fiscal…"></div>
         </div>
       </section>
 
@@ -1424,92 +1589,105 @@ async function viewForm(id, duplicar = false) {
         ${secH(3, 'Contratos', 'Contrato do espaço e da montadora do estande', 'contratos')}
         <div class="sub-h" style="margin-top:0">Contrato sobre o evento</div>
         <div class="grid g3">
-          <div class="field"><label for="f-ce-data">Data de aprovação</label><input id="f-ce-data" type="date" value="${esc(d.contratoEvento.data)}"></div>
-          <div class="field"><label for="f-ce-area">Área (m²)</label><input id="f-ce-area" inputmode="decimal" value="${esc(d.contratoEvento.area ?? '')}" placeholder="0"></div>
-          <div class="field"><label for="f-ce-valor">Valor</label><div class="prefix"><span>R$</span><input id="f-ce-valor" class="money" inputmode="decimal" value="${fmtNum(d.contratoEvento.valor)}" placeholder="0,00"></div></div>
+          <div class="field"><label for="f-ce-data">Data de aprovação</label><input id="f-ce-data" type="date" value="${esc(d.contratoEvento?.data)}"></div>
+          <div class="field"><label for="f-ce-area">Área (m²)</label><input id="f-ce-area" inputmode="decimal" value="${esc(d.contratoEvento?.area ?? '')}" placeholder="0"></div>
+          <div class="field"><label for="f-ce-valor">Valor</label><div class="prefix"><span>R$</span><input id="f-ce-valor" class="money" inputmode="decimal" value="${fmtNum(d.contratoEvento?.valor)}" placeholder="0,00"></div></div>
         </div>
         <div class="sub-h">Contrato da montadora</div>
         <div class="grid g3">
-          <div class="field"><label for="f-mo-data">Data do contrato</label><input id="f-mo-data" type="date" value="${esc(d.montadora.data)}"></div>
-          <div class="field"><label for="f-mo-nome">Montadora</label><input id="f-mo-nome" value="${esc(d.montadora.nome)}" placeholder="Nome da montadora" maxlength="200"></div>
-          <div class="field"><label for="f-mo-valor">Valor</label><div class="prefix"><span>R$</span><input id="f-mo-valor" class="money" inputmode="decimal" value="${fmtNum(d.montadora.valor)}" placeholder="0,00"></div></div>
+          <div class="field"><label for="f-mo-data">Data do contrato</label><input id="f-mo-data" type="date" value="${esc(d.montadora?.data)}"></div>
+          <div class="field"><label for="f-mo-nome">Montadora</label><input id="f-mo-nome" value="${esc(d.montadora?.nome)}" placeholder="Nome da montadora" maxlength="200"></div>
+          <div class="field"><label for="f-mo-valor">Valor</label><div class="prefix"><span>R$</span><input id="f-mo-valor" class="money" inputmode="decimal" value="${fmtNum(d.montadora?.valor)}" placeholder="0,00"></div></div>
         </div>
       </section>
 
       <section class="card">
-        ${secH(4, 'Serviços contratados', 'Mobiliário e equipamentos do estande', 'servicos')}
-        <table class="items" id="it-servicos"><thead><tr><th>Item</th><th>Qtde</th><th>Valor</th><th></th></tr></thead><tbody>${d.servicos.map((s) => itemHtml('servicos', s)).join('')}</tbody></table>
+        ${secH(4, 'Serviços contratados', 'Mobiliário e equipamentos do estande — o total é quantidade × valor unitário', 'servicos')}
+        ${A ? '' : tabItens('servicos', false)}
         <button type="button" class="btn add-row btn-sm" data-add-item="servicos">${ic('plus')}Outro serviço</button>
       </section>
 
       <section class="card">
-        ${secH(5, 'Gastos diversos', 'Materiais, brindes e itens de apoio', 'gastos')}
-        <table class="items" id="it-gastos"><thead><tr><th>Item</th><th>Qtde</th><th>Valor</th><th class="o">Observação</th><th></th></tr></thead><tbody>${d.gastos.map((g) => itemHtml('gastos', g)).join('')}</tbody></table>
+        ${secH(5, 'Gastos diversos', 'Materiais, brindes e itens de apoio — o total é quantidade × valor unitário', 'gastos')}
+        ${A ? '' : tabItens('gastos', true)}
         <button type="button" class="btn add-row btn-sm" data-add-item="gastos">${ic('plus')}Outro gasto</button>
       </section>
 
       <section class="card">
         ${secH(6, 'Envolvidos', 'Pessoas que participam do evento. Os nomes viram sugestão em hospedagem e passagens.')}
-        ${reps('envolvidos', d.envolvidos)}
+        ${A ? '' : reps('envolvidos', d.envolvidos)}
       </section>
 
       <section class="card">
         ${secH(7, 'Hospedagem', 'Uma linha por hóspede', 'hospedagem')}
-        ${reps('hospedagem', d.hospedagem)}${hintEnter}
+        ${A ? '' : reps('hospedagem', d.hospedagem)}${hintEnter}
       </section>
 
       <section class="card">
         ${secH(8, 'Alimentação', '', 'alimentacao')}
-        ${reps('alimentacao', d.alimentacao)}
+        ${A ? '' : reps('alimentacao', d.alimentacao)}
       </section>
 
       <section class="card">
         ${secH(9, 'Passagem / condução', 'Uma linha por pessoa e trecho', 'passagens')}
-        ${reps('passagens', d.passagens)}
+        ${A ? '' : reps('passagens', d.passagens)}
+      </section>
+      ${secObs(10)}
+      ${secArq(11)}`;
+
+  const secoesAtividade = `
+      <section class="card">
+        ${secH(2, 'Contrato', 'Aprovação e valor da atividade', 'contrato')}
+        <div class="grid g3">
+          <div class="field"><label for="f-ct-data">Data de aprovação</label><input id="f-ct-data" type="date" value="${esc(d.contrato?.data)}"></div>
+          <div class="field"><label for="f-ct-tipo">Tipo</label><input id="f-ct-tipo" value="${esc(d.contrato?.tipo)}" maxlength="120" placeholder="Ex.: veiculação, produção, impressão…"></div>
+          <div class="field"><label for="f-ct-valor">Valor</label><div class="prefix"><span>R$</span><input id="f-ct-valor" class="money" inputmode="decimal" value="${fmtNum(d.contrato?.valor)}" placeholder="0,00"></div></div>
+        </div>
       </section>
 
       <section class="card">
-        ${secH(10, 'Observações', 'Informações adicionais sobre o evento')}
-        <textarea id="f-obs" placeholder="Opcional" maxlength="5000">${esc(d.observacoes)}</textarea>
+        ${secH(3, 'Serviços a realizar', 'Uma linha por serviço: anúncio, folder, panfleto, catálogo, vídeo ou outro')}
+        ${reps('servicosAtv', d.servicos)}${hintEnter}
       </section>
+      ${secObs(4)}
+      ${secArq(5)}`;
 
-      <section class="card" id="anxCard">
-        ${secH(11, 'Fotos e arquivos', 'Fotos do estande, projeto, contratos… JPG, PNG, WEBP, GIF ou PDF, até 10 MB')}
-        ${novo ? '' : `<div class="sub-h" style="margin-top:0">Já anexados <span class="muted small" id="anxCount"></span></div><div id="anxBox"></div><div class="sub-h">Adicionar novos</div>`}
-        <div id="anxPend"></div>
-        <label class="btn add-row" for="anxInput" style="margin-top:0">${ic('upload')}Escolher fotos ou arquivos</label>
-        <input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">
-        <div class="kbd-hint">${ic('info')}<span>Os arquivos escolhidos são enviados quando você clicar em <b>Salvar</b>. No computador, também dá para arrastar para cá.</span></div>
-      </section>
+  view().innerHTML = `<form id="frm" novalidate autocomplete="off"><div class="form-layout">
+    <div class="form-main">
+      ${secDados}
+      ${A ? secoesAtividade : secoesEvento}
     </div>
 
     <aside class="resumo"><div class="card">
-      <div class="num-ev">${novo ? 'Novo evento · Nº automático' : 'Evento Nº ' + pad(ev.numero)}</div>
+      <div class="num-ev">${novo ? `${K.nova} · Nº automático` : `${K.Sing} Nº ` + pad(ev.numero)}</div>
       <div class="ev-t" id="rs-nome"></div>
       <div id="rs-sit" style="margin-bottom:14px"></div>
-      <div class="lines">${CATS.map(([k, l]) => `<div data-c="${k}"><span>${l}</span><b></b></div>`).join('')}</div>
-      <div class="tot"><span>Valor total de investimento</span><b id="rs-tot"></b></div>
-      <div class="btns"><button class="btn btn-primary btn-block" type="submit">${ic('save')}${novo ? 'Salvar evento' : 'Salvar alterações'}</button>
-        <a class="btn btn-block" href="${novo ? '#/eventos' : '#/eventos/' + ev.id}">Cancelar</a></div>
+      <div class="lines">${cats.map(([k, l]) => `<div data-c="${k}"><span>${l}</span><b></b></div>`).join('')}</div>
+      <div class="tot"><span>${A ? 'Valor total' : 'Valor total de investimento'}</span><b id="rs-tot"></b></div>
+      <div class="rs-pct small" id="rs-pct"></div>
+      <div class="btns"><button class="btn btn-primary btn-block" type="submit">${ic('save')}${novo ? `Salvar ${K.sing}` : 'Salvar alterações'}</button>
+        <a class="btn btn-block" href="${voltar}">Cancelar</a></div>
       ${novo ? '' : `<div class="meta">Cadastrado por ${esc(nomeDe(ev.criado_por))} em ${fdt(ev.criado_em)}<br>Última alteração: ${esc(nomeDe(ev.atualizado_por))}, ${fdt(ev.atualizado_em)}</div>`}
     </div></aside>
   </div>
   <div class="savebar"><div class="t"><span>Total</span><b id="sb-tot"></b></div><button class="btn btn-primary" type="submit">${ic('save')}Salvar</button></div>
   <datalist id="dl-env"></datalist>
   <datalist id="dl-ger">${sugGerentes.map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
-  <datalist id="dl-tipos">${tiposDe(S.eventos).filter((t) => !TIPOS.includes(t)).map((t) => `<option value="${esc(t)}">`).join('')}</datalist>
+  <datalist id="dl-tipos">${tiposDe(mesmos, base).filter((t) => !base.includes(t)).map((t) => `<option value="${esc(t)}">`).join('')}</datalist>
   <datalist id="dl-cli-cod">${clientesAnt.map((c) => `<option value="${esc(c.codigo)}">${esc(c.nome)}</option>`).join('')}</datalist>
   <datalist id="dl-cli-nome">${uniq(clientesAnt.map((c) => c.nome)).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
   <datalist id="dl-loc">${sugLocais.map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
   </form>`;
 
   const frm = $('#frm');
+  const v = (id) => ($('#f-' + id)?.value || '').trim();
 
   const ler = () => {
-    const v = (id) => $('#f-' + id).value.trim();
     const itens = (g) => $$(`#it-${g} tr[data-item]`).map((tr) => {
       const q = $('[data-k=qt]', tr).value;
-      const o = { nome: tr.dataset.fixo ? tr.dataset.nome : $('[data-k=nome]', tr).value.trim(), fixo: !!tr.dataset.fixo, qt: q === '' ? '' : Math.min(999999, Math.max(0, Math.round(Number(q)) || 0)), valor: parseMoney($('[data-k=valor]', tr).value) };
+      const qt = q === '' ? '' : Math.min(999999, Math.max(0, Math.round(Number(q)) || 0));
+      const unit = parseMoney($('[data-k=unit]', tr).value);
+      const o = { nome: tr.dataset.fixo ? tr.dataset.nome : $('[data-k=nome]', tr).value.trim(), fixo: !!tr.dataset.fixo, qt, unit, valor: unit ? totalItem(unit, qt) : 0 };
       const ob = $('[data-k=obs]', tr);
       if (ob) o.obs = ob.value.trim();
       return o;
@@ -1519,43 +1697,60 @@ async function viewForm(id, duplicar = false) {
       $$('[data-k]', r).forEach((i) => { o[i.dataset.k] = i.classList.contains('money') ? parseMoney(i.value) : i.value.trim(); });
       return o;
     });
-    const area = v('ce-area');
-    return {
+    const comum = {
       situacao: $('input[name=sit]:checked', frm)?.value || 'analise',
-      visibilidade: $('input[name=vis]:checked', frm)?.value || ev.visibilidade || 'todos', tipo: v('tipo') === OUTRO_TIPO ? v('tipo-outro') : v('tipo'), nome: v('nome'), local: v('local'), gerente: v('gerente'),
+      visibilidade: $('input[name=vis]:checked', frm)?.value || ev.visibilidade || 'todos',
+      tipo: v('tipo') === OUTRO_TIPO ? v('tipo-outro') : v('tipo'), nome: v('nome'), gerente: v('gerente'),
       data_inicio: v('inicio'), data_fim: v('fim'),
-      dados: {
-        contratoEvento: { data: v('ce-data'), area: area ? parseMoney(area) : '', valor: parseMoney(v('ce-valor')) },
-        montadora: { data: v('mo-data'), nome: v('mo-nome'), valor: parseMoney(v('mo-valor')) },
-        cliente: { codigo: v('cli-cod'), nome: v('cli-nome') },
-        hora_inicio: v('hini'), hora_fim: v('hfim'),
-        entrega: {
-          destinatario: v('en-dest'), telefone: v('en-tel'), email: v('en-email').toLowerCase(), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
-          complemento: v('en-comp'), bairro: v('en-bairro'), cidade: v('en-cidade'), uf: v('en-uf'),
-          data: v('en-data'), horario: v('en-hora'), obs: v('en-obs'),
-        },
-        servicos: itens('servicos'), gastos: itens('gastos'),
-        envolvidos: linhas('envolvidos').map((r) => r.nome), hospedagem: linhas('hospedagem'),
-        alimentacao: linhas('alimentacao'), passagens: linhas('passagens'), observacoes: $('#f-obs').value.trim(),
-      },
     };
+    const cliente = { codigo: v('cli-cod'), nome: v('cli-nome') };
+    const compras = [0, 1, 2].map((i) => ({ ano: Number($('#f-cp-' + i).dataset.ano), valor: parseMoney($('#f-cp-' + i).value) }));
+    if (A) {
+      return { ...comum, dados: {
+        cliente, compras, contrato: { data: v('ct-data'), tipo: v('ct-tipo'), valor: parseMoney(v('ct-valor')) },
+        servicos: linhas('servicosAtv').map((x) => ({ ...x, email: (x.email || '').toLowerCase() })), observacoes: $('#f-obs').value.trim(),
+      } };
+    }
+    const area = v('ce-area');
+    return { ...comum, local: v('local'), dados: {
+      contratoEvento: { data: v('ce-data'), area: area ? parseMoney(area) : '', valor: parseMoney(v('ce-valor')) },
+      montadora: { data: v('mo-data'), nome: v('mo-nome'), valor: parseMoney(v('mo-valor')) },
+      cliente, compras, hora_inicio: v('hini'), hora_fim: v('hfim'),
+      entrega: {
+        destinatario: v('en-dest'), telefone: v('en-tel'), email: v('en-email').toLowerCase(), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
+        complemento: v('en-comp'), bairro: v('en-bairro'), cidade: v('en-cidade'), uf: v('en-uf'),
+        data: v('en-data'), horario: v('en-hora'), obs: v('en-obs'),
+      },
+      servicos: itens('servicos'), gastos: itens('gastos'),
+      envolvidos: linhas('envolvidos').map((r) => r.nome), hospedagem: linhas('hospedagem'),
+      alimentacao: linhas('alimentacao'), passagens: linhas('passagens'), observacoes: $('#f-obs').value.trim(),
+    } };
   };
 
   const atualizar = () => {
-    const f = ler(), st = subtotais(f.dados), tot = totalDe(f.dados);
-    $('#rs-nome').textContent = f.nome || 'Evento sem nome';
+    const f = ler();
+    const st = A ? { contrato: Math.max(0, Number(f.dados.contrato.valor) || 0) } : subtotais(f.dados);
+    const tot = A ? st.contrato : totalDe(f.dados);
+    $('#rs-nome').textContent = f.nome || `${K.Sing} sem nome`;
     $('#rs-sit').innerHTML = pill(f.situacao) + ` <span class="tag">${esc(f.tipo)}</span>`;
-    CATS.forEach(([k]) => {
+    cats.forEach(([k]) => {
       const row = $(`.lines [data-c="${k}"]`);
       row.classList.toggle('z', !st[k]);
       $('b', row).textContent = brl(st[k]);
-      const s = $('#st-' + k); if (s) s.textContent = st[k] ? brl(st[k]) : '';
+      const sEl = $('#st-' + k); if (sEl) sEl.textContent = st[k] ? brl(st[k]) : '';
     });
     $('#rs-tot').textContent = brl(tot);
     $('#sb-tot').textContent = brl(tot);
-    $$('.items tr[data-item]').forEach((tr) => tr.classList.toggle('has', !!($('[data-k=qt]', tr).value || parseMoney($('[data-k=valor]', tr).value))));
+    const pct = compraTexto(tot, f.dados.compras);
+    $('#pctInfo').innerHTML = pct ? `${ic('trend')}<span>O ${A ? 'valor desta atividade' : 'investimento'} representa <b>${esc(pct)}</b>.</span>` : '';
+    $('#rs-pct').textContent = pct ? pct.split(' · ')[0] : '';
+    $$('.items tr[data-item]').forEach((tr) => {
+      const q = $('[data-k=qt]', tr).value, u = parseMoney($('[data-k=unit]', tr).value);
+      $('[data-tot]', tr).textContent = u ? brl(totalItem(u, q === '' ? '' : Number(q))) : '—';
+      tr.classList.toggle('has', !!(q || u));
+    });
     $$('#seg label, #segVis label').forEach((l) => l.classList.toggle('on', $('input', l).checked));
-    $('#dl-env').innerHTML = uniq(f.dados.envolvidos).map((n) => `<option value="${esc(n)}">`).join('');
+    if ($('#dl-env') && f.dados.envolvidos) $('#dl-env').innerHTML = uniq(f.dados.envolvidos).map((n) => `<option value="${esc(n)}">`).join('');
   };
   const renumerar = (box) => $$('[data-rep]', box).forEach((r, i) => { const n = $('.n', r); n.textContent = box.id === 'rp-envolvidos' ? i + 1 : `${REP[box.id.slice(3)].titulo} ${i + 1}`; });
   const addRep = (tipo, foco = true) => {
@@ -1616,32 +1811,34 @@ async function viewForm(id, duplicar = false) {
     if (outro) outroTipo.focus();
   });
 
-  // CEP → endereço (ViaCEP, gratuito)
+  // CEP → endereço (ViaCEP, gratuito) — só em eventos
   const cep = $('#f-en-cep'), cepMsg = $('#cepMsg');
-  let ultimoCep = cep.value.replace(/\D/g, '');
-  const buscarCep = async () => {
-    const dig = cep.value.replace(/\D/g, '');
-    if (dig.length === 8) cep.value = dig.slice(0, 5) + '-' + dig.slice(5);
-    if (dig.length !== 8 || dig === ultimoCep) return;
-    ultimoCep = dig;
-    cepMsg.textContent = 'Buscando endereço…';
-    try {
-      const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), 6000);
-      const r = await fetch(`https://viacep.com.br/ws/${dig}/json/`, { signal: ctl.signal }).then((x) => x.json());
-      clearTimeout(t);
-      if (r.erro) { cepMsg.textContent = 'CEP não encontrado. Preencha à mão.'; return; }
-      const por = (id, val) => { if (val) $('#f-' + id).value = String(val).slice(0, 200); };
-      por('en-rua', r.logradouro); por('en-bairro', r.bairro); por('en-cidade', r.localidade);
-      if (UFS.includes(r.uf)) $('#f-en-uf').value = r.uf;
-      cepMsg.textContent = 'Endereço encontrado. Confira e informe o número.';
-      S.dirty = true;
-      atualizar();
-      $('#f-en-num').focus();
-    } catch { cepMsg.textContent = 'Não foi possível buscar o CEP agora. Preencha à mão.'; }
-  };
-  cep.addEventListener('input', () => { if (cep.value.replace(/\D/g, '').length === 8) buscarCep(); });
-  cep.addEventListener('blur', buscarCep);
+  if (cep) {
+    let ultimoCep = cep.value.replace(/\D/g, '');
+    const buscarCep = async () => {
+      const dig = cep.value.replace(/\D/g, '');
+      if (dig.length === 8) cep.value = dig.slice(0, 5) + '-' + dig.slice(5);
+      if (dig.length !== 8 || dig === ultimoCep) return;
+      ultimoCep = dig;
+      cepMsg.textContent = 'Buscando endereço…';
+      try {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 6000);
+        const r = await fetch(`https://viacep.com.br/ws/${dig}/json/`, { signal: ctl.signal }).then((x) => x.json());
+        clearTimeout(t);
+        if (r.erro) { cepMsg.textContent = 'CEP não encontrado. Preencha à mão.'; return; }
+        const por = (id, val) => { if (val) $('#f-' + id).value = String(val).slice(0, 200); };
+        por('en-rua', r.logradouro); por('en-bairro', r.bairro); por('en-cidade', r.localidade);
+        if (UFS.includes(r.uf)) $('#f-en-uf').value = r.uf;
+        cepMsg.textContent = 'Endereço encontrado. Confira e informe o número.';
+        S.dirty = true;
+        atualizar();
+        $('#f-en-num').focus();
+      } catch { cepMsg.textContent = 'Não foi possível buscar o CEP agora. Preencha à mão.'; }
+    };
+    cep.addEventListener('input', () => { if (cep.value.replace(/\D/g, '').length === 8) buscarCep(); });
+    cep.addEventListener('blur', buscarCep);
+  }
 
   frm.addEventListener('click', (e) => {
     const a = e.target.closest('[data-add]');
@@ -1657,7 +1854,7 @@ async function viewForm(id, duplicar = false) {
     if (rm) {
       const rep = rm.closest('[data-rep]'), box = rep.parentElement;
       if ($$('[data-rep]', box).length > 1) rep.remove();
-      else $$('[data-k]', rep).forEach((i) => { if (i.tagName !== 'SELECT') i.value = ''; });
+      else $$('[data-k]', rep).forEach((i) => { i.value = i.tagName === 'SELECT' ? (i.options[0]?.value ?? '') : ''; });
       renumerar(box); atualizar(); S.dirty = true; return;
     }
     const ri = e.target.closest('[data-rm-item]');
@@ -1674,7 +1871,7 @@ async function viewForm(id, duplicar = false) {
     if (rep) {
       const box = rep.parentElement, tipo = box.id.slice(3);
       const campos = $$('[data-k]', rep);
-      const vazia = campos.every((i) => i.tagName === 'SELECT' || !i.value.trim());
+      const vazia = campos.every((i) => (i.tagName === 'SELECT' && i.dataset.k === 'meio') || !i.value.trim());
       if (vazia) {
         const sec = box.closest('section');
         if ($$('[data-rep]', box).length > 1) { rep.remove(); renumerar(box); atualizar(); }
@@ -1695,28 +1892,34 @@ async function viewForm(id, duplicar = false) {
     e.preventDefault();
     $$('.invalid', frm).forEach((x) => x.classList.remove('invalid'));
     const f = ler();
-    const erro = (id, msg) => { const el = $('#f-' + id); el.classList.add('invalid'); el.focus(); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); toast(msg, 'err'); };
-    if (!f.nome) return erro('nome', 'Informe o nome do evento.');
-    if (!f.tipo) return erro('tipo-outro', 'Escreva o tipo do evento.');
-    if (f.dados.entrega.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.dados.entrega.email)) return erro('en-email', 'E-mail do cliente inválido.');
+    const erro = (id, msg) => { const el = $('#f-' + id); if (el) { el.classList.add('invalid'); el.focus(); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } toast(msg, 'err'); };
+    const emailOk = (x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x);
+    if (!f.nome) return erro('nome', `Informe o nome d${K.o} ${K.sing}.`);
+    if (!f.tipo) return erro('tipo-outro', `Escreva o tipo d${K.o} ${K.sing}.`);
     if (f.data_inicio && f.data_fim && f.data_fim < f.data_inicio) return erro('fim', 'A data de término é anterior à data de início.');
-    if (f.dados.hospedagem.some((h) => h.chegada && h.saida && h.saida < h.chegada)) { toast('Há hospedagem com saída antes da chegada.', 'err'); return; }
-
-    const temAlgo = (o) => Object.entries(o).some(([k, v]) => k !== 'meio' && v !== '' && v !== 0 && v != null);
     const dd = f.dados;
-    dd.servicos = dd.servicos.filter((s) => s.qt || s.valor || (!s.fixo && s.nome)).map((s) => ({ ...s, nome: s.nome || 'Outro serviço' }));
-    dd.gastos = dd.gastos.filter((g) => g.qt || g.valor || g.obs || (!g.fixo && g.nome)).map((g) => ({ ...g, nome: g.nome || 'Outro gasto' }));
-    dd.envolvidos = dd.envolvidos.filter(Boolean);
-    dd.hospedagem = dd.hospedagem.filter(temAlgo);
-    dd.alimentacao = dd.alimentacao.filter(temAlgo);
-    dd.passagens = dd.passagens.filter(temAlgo);
+    if (A) {
+      dd.servicos = dd.servicos.filter((x) => x.tipo || x.formato || x.responsavel || x.email);
+      const ruim = dd.servicos.find((x) => x.email && !emailOk(x.email));
+      if (ruim) { toast(`E-mail para envio inválido: ${ruim.email}`, 'err'); return; }
+    } else {
+      if (dd.entrega.email && !emailOk(dd.entrega.email)) return erro('en-email', 'E-mail do cliente inválido.');
+      if (dd.hospedagem.some((h) => h.chegada && h.saida && h.saida < h.chegada)) { toast('Há hospedagem com saída antes da chegada.', 'err'); return; }
+      const temAlgo = (o) => Object.entries(o).some(([k, val]) => k !== 'meio' && val !== '' && val !== 0 && val != null);
+      dd.servicos = dd.servicos.filter((x) => x.qt || x.unit || (!x.fixo && x.nome)).map((x) => ({ ...x, nome: x.nome || 'Outro serviço' }));
+      dd.gastos = dd.gastos.filter((x) => x.qt || x.unit || x.obs || (!x.fixo && x.nome)).map((x) => ({ ...x, nome: x.nome || 'Outro gasto' }));
+      dd.envolvidos = dd.envolvidos.filter(Boolean);
+      dd.hospedagem = dd.hospedagem.filter(temAlgo);
+      dd.alimentacao = dd.alimentacao.filter(temAlgo);
+      dd.passagens = dd.passagens.filter(temAlgo);
+    }
 
     const btns = $$('[type=submit]', frm).concat($$('#pgActs [type=submit]'));
     btns.forEach((b) => { b.disabled = true; });
     try {
-      const salvo = await api.saveEvento({ ...f, id: ev.id });
+      const salvo = await (A ? api.saveAtividade({ ...f, id: ev.id }) : api.saveEvento({ ...f, id: ev.id }));
       S.dirty = false;
-      S.eventos = [];
+      if (A) S.atividades = []; else S.eventos = [];
       let enviados = 0;
       if (pendentes.length) {
         ev.id = salvo.id;  // se algo falhar depois daqui, um novo Salvar atualiza em vez de duplicar
@@ -1726,14 +1929,170 @@ async function viewForm(id, duplicar = false) {
         pendentes.forEach((p) => p.url && URL.revokeObjectURL(p.url));
       }
       const extra = enviados ? ` com ${enviados} arquivo${enviados > 1 ? 's' : ''}` : '';
-      toast(novo ? `Evento Nº ${pad(salvo.numero)} cadastrado${extra}` : `Alterações salvas${extra}`);
-      location.hash = '#/eventos/' + salvo.id;
+      toast(novo ? `${K.Sing} Nº ${pad(salvo.numero)} cadastrad${K.o}${extra}` : `Alterações salvas${extra}`);
+      location.hash = `#/${K.rota}/${salvo.id}`;
     } catch (x) {
       toast(msgErro(x), 'err');
       btns.forEach((b) => { b.disabled = false; });
     }
   });
   $('#f-nome').focus();
+}
+
+/* ================================================================
+   Atividades: lista, página e ficha de impressão
+   ================================================================ */
+async function viewAtividades() {
+  setPage('Atividades', 'Anúncios, folders, catálogos, vídeos e outras ações. Você edita as que criou' + (isAdmin() ? ' e, como administrador, qualquer uma.' : '.'),
+    `<a class="btn btn-primary" href="#/atividades/nova">${ic('plus')}<span>Nova <span class="lbl-long">atividade</span></span></a>`);
+  carregando();
+  const lst = S.atividades = await api.listAtividades();
+  const F = S.filtrosAtv;
+  view().innerHTML = `<div class="card">
+    <div class="filters">
+      <div class="search input-icon">${ic('search')}<input id="aq" type="search" placeholder="Buscar por atividade, cliente, gerente, responsável ou número" value="${esc(F.q)}"></div>
+      <select id="atipo" aria-label="Tipo"><option value="">Todos os tipos</option>${tiposDe(lst, TIPOS_ATV).map((t) => `<option ${F.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      <label class="toggle"><input type="checkbox" id="ameus" ${F.meus ? 'checked' : ''}><span class="sw"></span>Só as minhas</label>
+    </div>
+    <div class="chips" id="asit" style="margin-bottom:14px"></div>
+    <div id="alista"></div>
+  </div>`;
+  const servTxt = (a) => uniq((a.dados?.servicos || []).map((x) => x.tipo)).join(', ');
+  const desenhar = () => {
+    const q = F.q.trim().toLowerCase();
+    const baseL = lst.filter((a) => (!F.tipo || a.tipo === F.tipo) && (!F.meus || a.criado_por === S.me.id)
+      && (!q || [a.nome, a.gerente, pad(a.numero), String(a.numero), a.tipo, clienteDe(a).codigo, clienteDe(a).nome, ...(a.dados?.servicos || []).map((x) => x.responsavel)]
+        .some((x) => String(x || '').toLowerCase().includes(q))));
+    const lista = baseL.filter((a) => !F.sit || a.situacao === F.sit);
+    $('#asit').innerHTML = [['', 'Todas', null], ...SIT_ORDEM.map((s) => [s, SIT[s].label, SIT[s].hex])]
+      .map(([sv, l, c]) => `<button class="chip ${F.sit === sv ? 'on' : ''}" data-s="${sv}">${c ? `<span class="d" style="background:${c}"></span>` : ''}${l} <span style="opacity:.6">${sv ? baseL.filter((a) => a.situacao === sv).length : baseL.length}</span></button>`).join('');
+    $$('#asit .chip').forEach((b) => b.onclick = () => { F.sit = b.dataset.s; desenhar(); });
+    if (!lst.length) { $('#alista').innerHTML = vazio('megaphone', 'Nenhuma atividade cadastrada', 'Cadastre a primeira atividade: um anúncio, folder, catálogo, vídeo…', `<a class="btn btn-primary" href="#/atividades/nova">${ic('plus')}Nova atividade</a>`); return; }
+    if (!lista.length) { $('#alista').innerHTML = vazio('search', 'Nada encontrado', 'Nenhuma atividade corresponde aos filtros escolhidos.'); return; }
+    $('#alista').innerHTML = `<div class="tbl-wrap"><table class="tbl cards">
+      <thead><tr><th>Nº</th><th>Atividade</th><th class="hide-md">Tipo</th><th>Período</th><th class="hide-md">Gerente</th><th>Situação</th><th class="right">Valor</th><th></th></tr></thead>
+      <tbody>${lista.map((a) => `<tr class="click" data-id="${a.id}">
+        <td data-hide><span class="seq">${pad(a.numero)}</span></td>
+        <td class="c-main"><div class="ev-name">${esc(a.nome)}${a.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(a)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(a)))}</div>` : ''}${servTxt(a) ? `<div class="ev-sub">${ic('megaphone')}${esc(servTxt(a))}</div>` : ''}</td>
+        <td data-hide class="hide-md"><span class="tag">${esc(a.tipo)}</span></td>
+        <td data-hide class="nowrap">${soDatas(a)}</td>
+        <td data-hide class="hide-md">${esc(a.gerente || '—')}</td>
+        <td class="c-sit">${pill(a.situacao)}</td>
+        <td class="c-val right num nowrap"><b>${brl(a.valor_total)}</b></td>
+        <td data-hide><div class="acts">
+          ${podeEditar(a) ? `<a class="btn btn-ghost icon-btn" href="#/atividades/${a.id}/editar" title="Editar" aria-label="Editar">${ic('pencil')}</a>
+            <button class="btn btn-ghost icon-btn btn-danger" data-del="${a.id}" title="Excluir" aria-label="Excluir">${ic('trash')}</button>`
+            : `<span class="btn btn-ghost icon-btn" title="Somente leitura: criada por ${esc(nomeDe(a.criado_por))}" style="cursor:default;color:var(--mute)">${ic('lock')}</span>`}
+        </div></td>
+        <td class="c-meta m-only">Nº ${pad(a.numero)} · ${esc(a.tipo)} · ${soDatas(a)}</td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="2" data-hide>${lista.length} atividade(s)</td><td data-hide class="hide-md"></td><td data-hide></td><td data-hide class="hide-md"></td><td data-hide></td><td class="right num nowrap" data-hide>${brl(soma(lista, (a) => a.valor_total))}</td><td data-hide></td></tr></tfoot>
+    </table></div>`;
+    $$('#alista tr.click').forEach((tr) => tr.addEventListener('click', (x) => { if (!x.target.closest('a,button')) location.hash = '#/atividades/' + tr.dataset.id; }));
+    $$('#alista [data-del]').forEach((b) => b.addEventListener('click', () => excluirEvento(lst.find((a) => a.id === b.dataset.del), () => viewAtividades(), 'atividade')));
+  };
+  let t;
+  $('#aq').addEventListener('input', (x) => { clearTimeout(t); t = setTimeout(() => { F.q = x.target.value; desenhar(); }, 150); });
+  $('#atipo').onchange = (x) => { F.tipo = x.target.value; desenhar(); };
+  $('#ameus').onchange = (x) => { F.meus = x.target.checked; desenhar(); };
+  desenhar();
+}
+
+function textoAtividade(a) {
+  const d = a.dados || {}, ct = d.contrato || {};
+  return `*Atividade Nº ${pad(a.numero)} — ${a.nome}*\n${clienteTexto(clienteDe(a)) ? 'Cliente: ' + clienteTexto(clienteDe(a)) + '\n' : ''}${SIT[a.situacao]?.label} · ${a.tipo}\n${soDatas(a)}\nGerente: ${a.gerente || '—'}\n` +
+    ((ct.valor || ct.tipo || ct.data) ? `Contrato: ${[ct.tipo, ct.data && 'aprovado ' + fdate(ct.data)].filter(Boolean).join(' · ')} — ${brl(ct.valor)}\n` : '') +
+    (d.servicos || []).map((x) => `• ${[x.tipo, x.formato].filter(Boolean).join(' — ')}${x.responsavel ? ' · Resp.: ' + x.responsavel : ''}${x.email ? ' · Envio: ' + x.email : ''}`).join('\n') +
+    (compraTexto(a.valor_total, d.compras) ? `\nRepresenta ${compraTexto(a.valor_total, d.compras)}` : '') + `\n*Valor: ${brl(a.valor_total)}*`;
+}
+
+function fichaAtividade(a) {
+  const d = a.dados || {}, ct = d.contrato || {}, cli = d.cliente || {};
+  const t = (x) => String(x ?? '').trim();
+  const junta = (...x) => x.map(t).filter(Boolean).map(esc).join(' · ');
+  const bloco = (titulo, corpo, dir = '') => t(corpo.replace(/<[^>]*>/g, '')) ? `<section class="f-bl"><h4>${titulo}${dir ? `<b>${dir}</b>` : ''}</h4>${corpo}</section>` : '';
+  const serv = (d.servicos || []).length ? `<table>${d.servicos.map((x) => `<tr><td><b>${esc(x.tipo || 'Serviço')}</b>${x.formato ? ` — ${esc(x.formato)}` : ''}<br><i>${junta(x.responsavel && 'Resp.: ' + x.responsavel, x.email && 'Envio: ' + x.email)}</i></td></tr>`).join('')}</table>` : '';
+  const contrato = (ct.valor || ct.tipo || ct.data) ? `<table><tr><td>${junta(ct.tipo, ct.data && 'aprovado ' + fdate(ct.data))}</td><td class="r">${brl(ct.valor)}</td></tr></table>` : '';
+  const compras = comprasLista(d.compras) ? `<p>${esc(comprasLista(d.compras))}</p>${compraTexto(a.valor_total, d.compras) ? `<p><b>Representa ${esc(compraTexto(a.valor_total, d.compras))}</b></p>` : ''}` : '';
+  return `<div class="ficha print-only">
+    <header class="f-top"><img src="assets/logo-dello.png" alt="Dello">
+      <div class="f-tit"><small>Ficha da atividade Nº ${pad(a.numero)}${a.visibilidade === 'privado' ? ' · Privado' : ''}</small><h2>${esc(a.nome)}</h2>
+        <div>${junta(a.tipo, soDatas(a))}</div>
+        ${clienteTexto(cli) || a.gerente ? `<div>${junta(clienteTexto(cli) && 'Cliente: ' + clienteTexto(cli), a.gerente && 'Gerente: ' + a.gerente)}</div>` : ''}</div>
+      <div class="f-tot"><span class="pill ${SIT[a.situacao]?.cor || 'gray'}">${SIT[a.situacao]?.label || ''}</span><small>Valor</small><b>${brl(a.valor_total)}</b></div>
+    </header>
+    <div class="f-cols">
+      ${bloco('Contrato', contrato, ct.valor ? brl(ct.valor) : '')}
+      ${bloco('Compras do cliente', compras)}
+      ${bloco('Serviços a realizar', serv)}
+      ${bloco('Observações', d.observacoes ? `<p class="f-obs">${esc(d.observacoes)}</p>` : '')}
+    </div>
+    <footer class="f-rod"><span id="fichaAnx"></span><span>Cadastrado por ${esc(nomeDe(a.criado_por))} em ${fdia(a.criado_em)} · Impresso em ${fdt(new Date())} por ${esc(S.me?.nome || '')}</span></footer>
+  </div>`;
+}
+
+async function viewDetalheAtv(id) {
+  carregando();
+  const a = await api.getAtividade(id);
+  if (!a) {
+    setPage('Atividade não encontrada');
+    view().innerHTML = `<div class="card">${vazio('alert', 'Atividade não encontrada', 'Ela pode ter sido excluída.', `<a class="btn" href="#/atividades">${ic('back')}Voltar para atividades</a>`)}</div>`;
+    return;
+  }
+  const d = a.dados || {}, ct = d.contrato || {}, pode = podeEditar(a);
+  setPage(`Atividade Nº ${pad(a.numero)}`, `<a href="#/atividades" style="text-decoration:none;font-weight:600">← Atividades</a>`,
+    `<button class="btn" id="dPrint" title="Imprimir">${ic('printer')}<span class="lbl-long">Imprimir</span></button>
+     <button class="btn" id="dWa" title="Compartilhar no WhatsApp">${ic('whats')}<span class="lbl-long">WhatsApp</span></button>
+     <a class="btn" href="#/atividades/${a.id}/duplicar" title="Duplicar">${ic('copy')}<span class="lbl-long">Duplicar</span></a>
+     ${pode ? `<button class="btn btn-danger" id="dDel" title="Excluir">${ic('trash')}</button><a class="btn btn-primary" href="#/atividades/${a.id}/editar">${ic('pencil')}Editar</a>` : ''}`);
+  const pct = compraTexto(a.valor_total, d.compras);
+  view().innerHTML = fichaAtividade(a) + `<div class="no-print">
+    ${pode ? '' : `<div class="info">${ic('lock')}<div>Somente leitura. Esta atividade foi criada por <b>${esc(nomeDe(a.criado_por))}</b>; só essa pessoa ou um administrador pode alterá-la.</div></div>`}
+    <div class="card">
+      <div class="det-head">
+        <div class="grow">${pill(a.situacao)} <span class="tag brand">${esc(a.tipo)}</span>${a.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado · só quem criou e administradores veem</span>` : ''}
+          <h2>${esc(a.nome)}</h2>
+          ${clienteTexto(d.cliente) ? `<div style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink-2)">${ic('user')}Cliente: ${esc(clienteTexto(d.cliente))}</div>` : ''}
+          ${pct ? `<div class="pct-info" style="margin-top:6px">${ic('trend')}<span>Representa <b>${esc(pct)}</b></span></div>` : ''}</div>
+        <div class="total-box"><span>Valor</span><b>${brl(a.valor_total)}</b></div>
+      </div>
+      <div class="facts">
+        <div><span>Período</span><b>${soDatas(a)}</b></div>
+        <div><span>Gerente responsável</span><b>${esc(a.gerente || '—')}</b></div>
+        <div><span>Cadastrado por</span><b>${esc(nomeDe(a.criado_por))}</b><div class="small muted">${fdt(a.criado_em)}</div></div>
+        <div><span>Última alteração</span><b>${esc(nomeDe(a.atualizado_por || a.criado_por))}</b><div class="small muted">${fdt(a.atualizado_em)}</div></div>
+      </div>
+    </div>
+    <div class="det-grid">
+      <div class="card"><div class="card-h"><h3>Contrato</h3><span class="sp"></span><b class="num">${brl(ct.valor)}</b></div>
+        <div class="grid g3"><div><div class="lbl">Aprovação</div>${fdate(ct.data) || '—'}</div><div><div class="lbl">Tipo</div>${esc(ct.tipo || '—')}</div><div><div class="lbl">Valor</div>${brl(ct.valor)}</div></div></div>
+      <div class="card"><div class="card-h"><h3>Compras do cliente</h3></div>
+        ${comprasLista(d.compras) ? `<table class="mini"><tbody>${(d.compras || []).map((c) => `<tr><td>${c.ano}</td><td class="r">${Number(c.valor) > 0 ? brl(c.valor) : '—'}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small" style="margin:0">Não informado.</p>'}</div>
+      <div class="card full"><div class="card-h"><h3>Serviços a realizar</h3></div>
+        ${(d.servicos || []).length ? `<div style="overflow-x:auto"><table class="mini"><thead><tr><th>Tipo</th><th>Formato / descrição</th><th>Responsável</th><th>E-mail para envio</th></tr></thead><tbody>
+          ${d.servicos.map((x) => `<tr><td><b>${esc(x.tipo || '—')}</b></td><td>${esc(x.formato || '—')}</td><td>${esc(x.responsavel || '—')}</td><td>${x.email ? `<a href="mailto:${encodeURIComponent(x.email)}">${esc(x.email)}</a>` : '—'}</td></tr>`).join('')}</tbody></table></div>`
+          : '<p class="muted small" style="margin:0">Nenhum serviço informado.</p>'}</div>
+      ${d.observacoes ? `<div class="card full"><div class="card-h"><h3>Observações</h3></div><div style="white-space:pre-wrap">${esc(d.observacoes)}</div></div>` : ''}
+      <div class="card full" id="anxCard"><div class="card-h"><h3>Fotos e arquivos <span class="muted small" id="anxCount"></span></h3><span class="sp"></span>
+        <span class="small muted hidden" id="anxStatus"></span>
+        ${pode ? `<label class="btn btn-sm btn-primary" for="anxInput">${ic('upload')}Adicionar</label><input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">` : ''}</div>
+        <div id="anxBox"></div></div>
+      <div class="card full"><div class="card-h"><h3>Histórico desta atividade</h3></div><div id="dHist"><div class="spinner"></div></div></div>
+    </div></div>`;
+
+  $('#dPrint').onclick = () => window.print();
+  $('#dWa').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(textoAtividade(a)), '_blank', 'noopener');
+  $('#dDel')?.addEventListener('click', () => excluirEvento(a, () => { location.hash = '#/atividades'; }, 'atividade'));
+  carregarAnexos(a, pode);
+  if (pode) {
+    $('#anxInput').onchange = (x) => { enviarAnexos(a, x.target.files, pode); x.target.value = ''; };
+    const card = $('#anxCard');
+    card.addEventListener('dragover', (x) => { x.preventDefault(); card.classList.add('drag'); });
+    card.addEventListener('dragleave', (x) => { if (!card.contains(x.relatedTarget)) card.classList.remove('drag'); });
+    card.addEventListener('drop', (x) => { x.preventDefault(); card.classList.remove('drag'); enviarAnexos(a, x.dataTransfer.files, pode); });
+  }
+  api.historico(a.id).then((hs) => { $('#dHist') && ($('#dHist').innerHTML = hs.length ? timeline(hs, false) : '<p class="muted small" style="margin:0">Sem registros.</p>'); })
+    .catch(() => { $('#dHist') && ($('#dHist').innerHTML = '<p class="muted small">Não foi possível carregar o histórico.</p>'); });
 }
 
 /* ================================================================
@@ -1745,6 +2104,7 @@ async function viewRelatorios() {
   const evs = S.eventos = await api.listEventos();
   const gerentes = uniq(evs.map((e) => e.gerente));
   const R = S.rel || (S.rel = { por: 'situacao', val: '', de: '', ate: '', formato: 'resumido' });
+  R.sits ||= [...SIT_ORDEM];
 
   view().innerHTML = `<div class="card no-print">
     <div class="rep-filters">
@@ -1753,6 +2113,9 @@ async function viewRelatorios() {
       <div id="rParam"></div>
       <div class="field"><label>Formato</label><select id="rFmt"><option value="resumido" ${R.formato === 'resumido' ? 'selected' : ''}>Resumido</option><option value="detalhado" ${R.formato === 'detalhado' ? 'selected' : ''}>Detalhado (todos os itens)</option></select></div>
       <button class="btn btn-primary" id="rGerar">${ic('file')}Gerar relatório</button>
+    </div>
+    <div class="rep-sits"><span class="lbl">Incluir as situações:</span>
+      ${SIT_ORDEM.map((s) => `<label class="chk-sit"><input type="checkbox" value="${s}" ${R.sits.includes(s) ? 'checked' : ''}><span class="d" style="background:${SIT[s].hex}"></span>${SIT[s].label}</label>`).join('')}
     </div></div>
     <div id="rOut"></div>`;
 
@@ -1769,6 +2132,11 @@ async function viewRelatorios() {
   $('#rPor').onchange = (e) => { R.por = e.target.value; R.val = ''; param(); };
   $('#rFmt').onchange = (e) => { R.formato = e.target.value; gerar(); };
   $('#rGerar').onclick = () => gerar();
+  $$('.rep-sits input').forEach((c) => c.addEventListener('change', () => {
+    R.sits = $$('.rep-sits input:checked').map((x) => x.value);
+    if (!R.sits.length) { c.checked = true; R.sits = [c.value]; toast('Deixe pelo menos uma situação marcada.', 'err'); }
+    gerar();
+  }));
   param();
 
   function gerar() {
@@ -1784,6 +2152,8 @@ async function viewRelatorios() {
       lista = lista.filter((e) => e.data_inicio && (!R.de || (e.data_fim || e.data_inicio) >= R.de) && (!R.ate || e.data_inicio <= R.ate));
       desc = 'Período: ' + (R.de || R.ate ? `${fdate(R.de) || 'início'} a ${fdate(R.ate) || 'hoje em diante'}` : 'todas as datas');
     }
+    lista = lista.filter((e) => R.sits.includes(e.situacao));
+    if (R.sits.length < SIT_ORDEM.length) desc += ' · Situações: ' + R.sits.map((s) => SIT[s].label).join(', ');
     lista = [...lista].sort((a, b) => (a.data_inicio || '9999').localeCompare(b.data_inicio || '9999'));
     const total = soma(lista, (e) => e.valor_total);
     const vs = (s) => soma(lista.filter((e) => e.situacao === s), (e) => e.valor_total);
@@ -1798,12 +2168,13 @@ async function viewRelatorios() {
     }
     const nomeGrupo = (k) => R.por === 'situacao' ? SIT[k]?.label : k;
 
-    const tabela = (l) => `<div style="overflow-x:auto"><table class="mini"><thead><tr><th>Nº</th><th>Evento</th><th>Tipo</th><th>Período</th><th>Gerente</th><th>Situação</th><th class="r">Valor</th></tr></thead>
-      <tbody>${l.map((e) => `<tr><td class="seq">${pad(e.numero)}</td><td><b>${esc(e.nome)}</b>${clienteTexto(clienteDe(e)) ? `<div class="small">${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="small muted">${esc(e.local)}</div></td><td>${esc(e.tipo)}</td><td class="nowrap">${periodo(e)}</td><td>${esc(e.gerente)}</td><td>${pill(e.situacao)}</td><td class="r">${brl(e.valor_total)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="6">${l.length} evento(s)</td><td class="r">${brl(soma(l, (e) => e.valor_total))}</td></tr></tfoot></table></div>`;
+    const tabela = (l) => `<div style="overflow-x:auto"><table class="mini"><thead><tr><th>Nº</th><th>Evento</th><th>Tipo</th><th>Período</th><th>Gerente</th><th>Situação</th><th class="r" title="Investimento em relação às compras do cliente no último ano informado">% compras</th><th class="r">Valor</th></tr></thead>
+      <tbody>${l.map((e) => `<tr><td class="seq">${pad(e.numero)}</td><td><b>${esc(e.nome)}</b>${clienteTexto(clienteDe(e)) ? `<div class="small">${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="small muted">${esc(e.local)}</div></td><td>${esc(e.tipo)}</td><td class="nowrap">${periodo(e)}</td><td>${esc(e.gerente)}</td><td>${pill(e.situacao)}</td><td class="r nowrap">${(() => { const x = analiseCompra(e.valor_total, e.dados?.compras); return x ? `${pctFmt(x.pctUlt)}<div class="small muted">de ${x.ultAno}</div>` : '—'; })()}</td><td class="r">${brl(e.valor_total)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="7">${l.length} evento(s)</td><td class="r">${brl(soma(l, (e) => e.valor_total))}</td></tr></tfoot></table></div>`;
     const detalhe = (e) => `<div class="rep-ev"><div class="h"><span class="seq">Nº ${pad(e.numero)}</span><b>${esc(e.nome)}</b>${clienteTexto(clienteDe(e)) ? `<span class="tag">${esc(clienteTexto(clienteDe(e)))}</span>` : ''}${pill(e.situacao)}<span class="sp"></span><span class="v">${brl(e.valor_total)}</span></div>
       <div class="i">${esc(e.tipo)} · ${periodo(e)} · ${esc(e.local || 'Local a definir')} · Gerente: ${esc(e.gerente || '—')}${(e.dados?.envolvidos || []).length ? ' · Envolvidos: ' + e.dados.envolvidos.map(esc).join(', ') : ''}</div>
       ${temEntrega(e.dados?.entrega) ? `<div class="i"><b>Entrega:</b> ${esc(entregaTexto(e.dados.entrega))}</div>` : ''}
+      ${comprasLista(e.dados?.compras) ? `<div class="i"><b>Compras do cliente:</b> ${esc(comprasLista(e.dados.compras))}${compraTexto(e.valor_total, e.dados.compras) ? ` — representa <b>${esc(compraTexto(e.valor_total, e.dados.compras))}</b>` : ''}</div>` : ''}
       ${linhasEvento(e).length ? `<table class="mini"><tbody>${linhasEvento(e).map(([g, d, v]) => `<tr><td style="width:150px"><b>${g}</b></td><td>${esc(d)}</td><td class="r">${brl(v)}</td></tr>`).join('')}</tbody></table>` : '<div class="small muted">Nenhum item lançado.</div>'}</div>`;
 
     $('#rOut').innerHTML = `<div class="card report">
@@ -1836,12 +2207,14 @@ async function viewRelatorios() {
 function exportarCsv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
   const q = (s) => { let t = String(s ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
-  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Cód. cliente', 'Cliente', 'Local', 'Gerente', 'Início', 'Término', 'Horário', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega'];
+  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Cód. cliente', 'Cliente', 'Local', 'Gerente', 'Início', 'Término', 'Horário', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Total', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega', 'Compras ano 1', 'Compras ano 2', 'Compras ano 3', '% das compras do último ano', '% da média de compras'];
   const linhas = lista.map((e) => {
     const st = subtotais(e.dados);
     return [pad(e.numero), SIT[e.situacao]?.label, e.tipo, e.nome, clienteDe(e).codigo || '', clienteDe(e).nome || '', e.local, e.gerente, fdate(e.data_inicio), fdate(e.data_fim), horarioTexto(e),
       n(st.contratos), n(st.servicos), n(st.gastos), n(st.hospedagem), n(st.alimentacao), n(st.passagens), n(e.valor_total), nomeDe(e.criado_por),
-      enderecoTexto(e.dados?.entrega || {}), e.dados?.entrega?.destinatario || '', fdate(e.dados?.entrega?.data)].map(q).join(';');
+      enderecoTexto(e.dados?.entrega || {}), e.dados?.entrega?.destinatario || '', fdate(e.dados?.entrega?.data),
+      ...comprasDe(e.dados).map((c) => Number(c.valor) > 0 ? `${c.ano}: ${n(c.valor)}` : ''),
+      ...(() => { const x = analiseCompra(e.valor_total, e.dados?.compras); return x ? [n(x.pctUlt) + '%', n(x.pctMedia) + '%'] : ['', '']; })()].map(q).join(';');
   });
   const blob = new Blob(['﻿' + [cab.map(q).join(';'), ...linhas].join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
@@ -1869,27 +2242,29 @@ function timeline(hs, comEvento = true) {
   return `<div class="timeline">${hs.map((h) => {
     const d = h.detalhes || {};
     const itens = Object.keys(CAMPOS_H).filter((k) => Array.isArray(d[k])).map((k) => `${CAMPOS_H[k]}: ${esc(fmtCampo(k, d[k][0]))} → <b>${esc(fmtCampo(k, d[k][1]))}</b>`);
-    if (d.dados) itens.push('Itens, contratos ou viagens atualizados');
+    if (d.dados) itens.push(h.tipo_registro === 'atividade' ? 'Contrato ou serviços atualizados' : 'Itens, contratos ou viagens atualizados');
     if (h.acao === 'excluiu' && d.valor_total != null) itens.push('Valor na exclusão: ' + brl(d.valor_total));
-    const alvo = comEvento ? ` o evento ${h.acao === 'excluiu' ? `<b>Nº ${pad(h.evento_numero)} — ${esc(h.evento_nome)}</b>` : `<a href="#/eventos/${h.evento_id}"><b>Nº ${pad(h.evento_numero)} — ${esc(h.evento_nome)}</b></a>`}` : ' o evento';
+    const atv = h.tipo_registro === 'atividade', oque = atv ? ' a atividade' : ' o evento';
+    const alvo = comEvento ? `${oque} ${h.acao === 'excluiu' ? `<b>Nº ${pad(h.evento_numero)} — ${esc(h.evento_nome)}</b>` : `<a href="#/${atv ? 'atividades' : 'eventos'}/${h.evento_id}"><b>Nº ${pad(h.evento_numero)} — ${esc(h.evento_nome)}</b></a>`}` : oque;
     return `<div class="tl"><div class="ic ${h.acao}">${ic(icone[h.acao] || 'info')}</div><div class="body"><div><b>${esc(h.usuario_nome || '—')}</b> ${verbo[h.acao] || h.acao}${alvo}</div>
       ${itens.length ? `<ul>${itens.map((i) => `<li>${i}</li>`).join('')}</ul>` : ''}<div class="when">${fdt(h.em)}</div></div></div>`;
   }).join('')}</div>`;
 }
 async function viewHistorico() {
-  setPage('Histórico', 'Registro automático de quem cadastrou, alterou ou excluiu cada evento');
+  setPage('Histórico', 'Registro automático de quem cadastrou, alterou ou excluiu eventos e atividades');
   carregando();
   const hs = await api.historico();
   view().innerHTML = `<div class="card">
     <div class="filters"><div class="search input-icon">${ic('search')}<input id="hq" type="search" placeholder="Filtrar por pessoa, evento ou número"></div>
-      <select id="ha" aria-label="Ação"><option value="">Todas as ações</option><option value="criou">Cadastros</option><option value="alterou">Alterações</option><option value="excluiu">Exclusões</option></select></div>
+      <select id="ha" aria-label="Ação"><option value="">Todas as ações</option><option value="criou">Cadastros</option><option value="alterou">Alterações</option><option value="excluiu">Exclusões</option></select>
+      <select id="hr" aria-label="Tipo"><option value="">Eventos e atividades</option><option value="evento">Só eventos</option><option value="atividade">Só atividades</option></select></div>
     <div id="hl"></div></div>`;
   const desenhar = () => {
-    const q = $('#hq').value.trim().toLowerCase(), a = $('#ha').value;
-    const l = hs.filter((h) => (!a || h.acao === a) && (!q || [h.usuario_nome, h.evento_nome, pad(h.evento_numero)].some((x) => String(x || '').toLowerCase().includes(q))));
+    const q = $('#hq').value.trim().toLowerCase(), a = $('#ha').value, tr = $('#hr').value;
+    const l = hs.filter((h) => (!a || h.acao === a) && (!tr || (h.tipo_registro || 'evento') === tr) && (!q || [h.usuario_nome, h.evento_nome, pad(h.evento_numero)].some((x) => String(x || '').toLowerCase().includes(q))));
     $('#hl').innerHTML = l.length ? timeline(l) : vazio('clock', 'Nenhum registro', hs.length ? 'Nada corresponde ao filtro.' : 'As ações nos eventos aparecerão aqui.');
   };
-  $('#hq').oninput = desenhar; $('#ha').onchange = desenhar;
+  $('#hq').oninput = desenhar; $('#ha').onchange = desenhar; $('#hr').onchange = desenhar;
   desenhar();
 }
 

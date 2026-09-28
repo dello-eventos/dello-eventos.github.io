@@ -57,8 +57,11 @@ Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rod
 - **Imprimir evento:** gera uma ficha compacta de 1 página, só com os campos preenchidos (também serve para "Salvar como PDF").
 - **Fotos e arquivos:** no próprio cadastro (enviados ao salvar) ou depois, na página do evento. Envie fotos do estande, projeto, contratos (JPG, PNG, WEBP, GIF ou PDF, até 10 MB). Fotos grandes são reduzidas automaticamente. Todos os aprovados veem; só quem criou o evento ou um admin envia e exclui. Espaço grátis: 1 GB. O botão **Enviar por e-mail** abre seu e-mail já endereçado ao cliente, com links das fotos válidos por 7 dias.
 - **Aplicativo:** botão **Instalar aplicativo** no menu cria um ícone na área de trabalho (Chrome/Edge) ou na tela inicial do celular.
+- **Atividades:** anúncios, folders, panfletos, catálogos, vídeos e outras ações. Cada atividade tem situação, visibilidade, cliente, compras, contrato (data de aprovação, tipo e valor), **serviços a realizar** (tipo, formato, responsável pela execução e e-mail para envio), observações, fotos/arquivos, histórico e ficha de impressão. Numeração própria.
+- **Compras do cliente:** em eventos e atividades, informe as compras dos últimos 3 anos. O sistema mostra quanto o valor representa (%) das compras do último ano e da média.
 - **Relatórios:**
   - por situação, evento, cliente, gerente, tipo ou período;
+  - escolha das situações incluídas (não aprovado, em análise, aprovado) e coluna "% das compras";
   - formato resumido ou detalhado;
   - Imprimir/PDF, WhatsApp, E-mail e Excel.
 - **Histórico:** registro automático de quem criou, alterou (com antes e depois) ou excluiu cada evento.
@@ -84,6 +87,7 @@ manifest.webmanifest                 configuração do aplicativo instalável
 supabase/schema.sql                  tabelas, permissões e histórico (já aplicado)
 supabase/opcional-senha-provisoria.sql  senha provisória definida pelo admin (já aplicado)
 supabase/migracao-visibilidade.sql   eventos privados (já aplicado)
+supabase/migracao-atividades.sql     área de Atividades (já aplicado)
 .github/workflows/manter-banco-ativo.yml  consulta a cada 3 dias para o banco não pausar
 ```
 
