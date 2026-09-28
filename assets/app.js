@@ -804,12 +804,18 @@ function renderShell() {
   root.innerHTML = `<div class="shell" id="shell">
     <aside class="side">
       <a class="brand" href="#/painel"><img src="assets/logo-dello.png" alt="Dello"><span>Gestão de Eventos</span></a>
+      <div class="nav-novo">
+        <span class="grp">Cadastrar</span>
+        <a href="#/eventos/novo" data-r="novo" title="Cadastrar um novo evento">${ic('plus')}Evento</a>
+        <a href="#/atividades/nova" data-r="nova-atv" title="Cadastrar uma nova atividade">${ic('plus')}Atividade</a>
+      </div>
       <nav class="nav">
+        <div class="grp">Geral</div>
         <a href="#/painel" data-r="painel">${ic('grid')}Painel</a>
+        <div class="grp">Cadastros</div>
         <a href="#/eventos" data-r="eventos">${ic('calendar')}Eventos</a>
-        <a href="#/eventos/novo" data-r="novo">${ic('plus')}Novo evento</a>
         <a href="#/atividades" data-r="atividades">${ic('megaphone')}Atividades</a>
-        <a href="#/atividades/nova" data-r="nova-atv">${ic('plus')}Nova atividade</a>
+        <div class="grp">Acompanhamento</div>
         <a href="#/relatorios" data-r="relatorios">${ic('chart')}Relatórios</a>
         <a href="#/historico" data-r="historico">${ic('clock')}Histórico</a>
         ${isAdmin() ? `<div class="grp">Administração</div><a href="#/usuarios" data-r="usuarios">${ic('users')}Usuários<span class="badge ${pend ? '' : 'hidden'}" id="pendBadge">${pend}</span></a>` : ''}
@@ -917,7 +923,9 @@ async function route() {
   const r = ROTAS.find(([re]) => re.test(h));
   if (!r) { location.hash = '#/painel'; return; }
   $('#shell').classList.remove('nav-open', 'has-savebar');
-  $$('.nav a').forEach((a) => a.classList.toggle('on', a.dataset.r === r[1]));
+  const destaque = { novo: 'eventos', 'nova-atv': 'atividades' }[r[1]] || r[1];
+  $$('.nav a').forEach((a) => a.classList.toggle('on', a.dataset.r === destaque));
+  $$('.nav-novo a').forEach((a) => a.classList.toggle('on', a.dataset.r === r[1]));
   window.scrollTo(0, 0);
   try { await r[2](h.match(r[0])); }
   catch (e) {
