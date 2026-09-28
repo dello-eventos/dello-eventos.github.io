@@ -17,7 +17,7 @@ const SIT_ORDEM = ['reprovado', 'analise', 'aprovado'];
 const TIPOS = ['Feira', 'Convenção', 'Workshop', 'Ação em cliente', 'Show room', 'Visita na fábrica', 'Palestra', 'Confraternização'];
 const SERVICOS = ['Bancada', 'Prateleiras', 'Mesa', 'Cadeiras', 'TV'];
 const GASTOS = ['Catálogo', 'Amostras', 'Brindes', 'Camisetas', 'Banner', 'Banco', 'Base giratória', 'Suportes', 'Plataforma', 'Toalhas', 'Flores', 'Outros'];
-const MEIOS = ['Aéreo', 'Ônibus', 'Carro'];
+const MEIOS = ['Aéreo', 'Ônibus', 'Carro', 'Carro alugado', 'Trem', 'Metrô', 'Táxi', 'Uber / 99', 'Van', 'Outro'];
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 const OUTRO_TIPO = '__outro__';
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
@@ -1300,7 +1300,7 @@ function normalizarDados(d = {}) {
 
 function campoRep(c, v) {
   let inp;
-  if (c.t === 'select') inp = `<select data-k="${c.k}">${c.opts.map((o) => `<option ${v === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  if (c.t === 'select') inp = `<select data-k="${c.k}">${[...c.opts, ...(v && !c.opts.includes(v) ? [v] : [])].map((o) => `<option ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   else if (c.t === 'money') inp = `<div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-k="${c.k}" value="${fmtNum(v)}" placeholder="0,00" autocomplete="off"></div>`;
   else inp = `<input type="${c.t || 'text'}" data-k="${c.k}" value="${esc(v ?? '')}" ${c.list ? `list="${c.list}"` : ''} placeholder="${esc(c.ph || '')}" maxlength="200" autocomplete="off">`;
   if (!c.l) return inp;
