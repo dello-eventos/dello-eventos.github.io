@@ -196,6 +196,36 @@ const entregaTexto = (en = {}) => [
   enderecoTexto(en), en.destinatario && 'Recebe: ' + en.destinatario + ([en.telefone, en.email].filter(Boolean).length ? ' (' + [en.telefone, en.email].filter(Boolean).join(', ') + ')' : ''),
   (en.data || en.horario) && 'Entrega: ' + [fdate(en.data), en.horario].filter(Boolean).join(' '), en.obs,
 ].filter(Boolean).join(' · ');
+/* Tema claro / noturno */
+const TEMA_KEY = 'dello.tema';
+const temaAtual = () => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+function aplicarTema(t, salvar = false) {
+  document.documentElement.dataset.theme = t;
+  $$('.tema-toggle').forEach((b) => {
+    b.setAttribute('aria-checked', String(t === 'dark'));
+    b.title = t === 'dark' ? 'Mudar para o modo claro' : 'Mudar para o modo noturno';
+  });
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', t === 'dark' ? '#0E1220' : '#EC6608');
+  if (salvar) store.set(TEMA_KEY, t);
+}
+const temaBotao = () => `<button type="button" class="tema-toggle" role="switch" aria-label="Modo noturno" aria-checked="${temaAtual() === 'dark'}" title="${temaAtual() === 'dark' ? 'Mudar para o modo claro' : 'Mudar para o modo noturno'}">
+  <span class="tt-ceu"></span>
+  <span class="tt-bola">
+    <svg class="tt-sol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+    <svg class="tt-lua" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.4A8.5 8.5 0 0 1 9.6 3.5a8.5 8.5 0 1 0 10.9 10.9z"/></svg>
+  </span></button>`;
+aplicarTema(temaAtual());
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.tema-toggle')) return;
+  const html = document.documentElement;
+  html.classList.add('tema-anim');
+  aplicarTema(temaAtual() === 'dark' ? 'light' : 'dark', true);
+  setTimeout(() => html.classList.remove('tema-anim'), 450);
+});
+try {
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => { if (!store.get(TEMA_KEY)) aplicarTema(e.matches ? 'dark' : 'light'); });
+} catch { /* navegador antigo */ }
+
 const pill = (s) => SIT[s] ? `<span class="pill ${SIT[s].cor}">${SIT[s].label}</span>` : '';
 const soma = (arr, f = (x) => x) => arr.reduce((t, x) => t + (Number(f(x)) || 0), 0);
 const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -729,7 +759,7 @@ function renderAuth(modo = 'entrar', aviso = null) {
       </div>
       <div class="foot">© ${new Date().getFullYear()} Dello · A marca da organização</div>
     </aside>
-    <main class="auth-form"><div class="auth-card">
+    <main class="auth-form">${temaBotao()}<div class="auth-card">
       <img class="logo-m" src="assets/logo-dello.png" alt="Dello">
       <h2>${cfg.h}</h2><p>${cfg.p}</p>
       ${modo === 'recuperar' ? `<button class="btn btn-primary btn-block" data-m="entrar">${ic('back')}Voltar para o login</button>` : `<form id="fAuth" novalidate>
@@ -835,6 +865,7 @@ function renderShell() {
         <button class="btn btn-ghost icon-btn menu-btn" id="btnMenu" aria-label="Menu">${ic('menu')}</button>
         <div class="titles"><h1 id="pgTitle"></h1><div class="sub" id="pgSub"></div></div>
         <div class="acts" id="pgActs"></div>
+        ${temaBotao()}
       </header>
       <div class="content" id="view"></div>
     </div></div>`;
