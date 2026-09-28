@@ -656,3 +656,10 @@ label.ocupado { opacity: .55; pointer-events: none; }
 .nav .grp { padding: 18px 12px 6px; }
 .nav a { padding: 9px 12px; }
 .nav a.on::before { left: -14px; }
+
+/* ---------- relatório como imagem/PDF ---------- */
+.captura { position: fixed; left: -12000px; top: 0; width: 980px; background: #fff; padding: 28px 32px; z-index: -1; }
+.captura .card { border: 0; box-shadow: none; padding: 0; }
+.captura [style*="overflow-x"], .captura .tbl-wrap { overflow: visible !important; }
+.spinner.mini { width: 14px; height: 14px; border-width: 2px; display: inline-block; vertical-align: -2px; }
+@media print { .report [style*="overflow-x"], .tbl-wrap { overflow: visible !important; } }

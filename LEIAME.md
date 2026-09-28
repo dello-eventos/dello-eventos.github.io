@@ -63,7 +63,7 @@ Esse recurso **já está ativado** no banco. Se um dia o banco for recriado, rod
   - por situação, evento, cliente, gerente, tipo ou período;
   - escolha das situações incluídas (não aprovado, em análise, aprovado) e coluna "% das compras";
   - formato resumido ou detalhado;
-  - Imprimir/PDF, WhatsApp, E-mail e Excel.
+  - Imprimir/PDF, **Enviar imagem** e **Enviar PDF** (abre o compartilhar do celular/Windows para mandar pelo WhatsApp com o arquivo anexado), WhatsApp em texto, E-mail e Excel.
 - **Histórico:** registro automático de quem criou, alterou (com antes e depois) ou excluiu cada evento.
 - **Usuários:** aprovar acesso, definir administradores e senhas provisórias.
 
