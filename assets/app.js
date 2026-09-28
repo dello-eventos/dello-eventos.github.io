@@ -1188,7 +1188,9 @@ async function viewDetalhe(id) {
   const d = e.dados || {}, st = subtotais(d), pode = podeEditar(e);
   setPage(`Evento Nº ${pad(e.numero)}`, `<a href="#/eventos" style="text-decoration:none;font-weight:600">← Eventos</a>`,
     `<button class="btn" id="dPrint" title="Imprimir">${ic('printer')}<span class="lbl-long">Imprimir</span></button>
-     <button class="btn" id="dWa" title="Compartilhar no WhatsApp">${ic('whats')}<span class="lbl-long">WhatsApp</span></button>
+     <button class="btn" id="dImg" title="Enviar a ficha como imagem (WhatsApp, e-mail…)">${ic('image')}<span class="lbl-long">Imagem</span></button>
+     <button class="btn" id="dPdf" title="Enviar a ficha em PDF (WhatsApp, e-mail…)">${ic('file')}<span class="lbl-long">PDF</span></button>
+     <button class="btn" id="dWa" title="Enviar o resumo em texto pelo WhatsApp">${ic('whats')}<span class="lbl-long">Texto</span></button>
      <a class="btn" href="#/eventos/${e.id}/duplicar" title="Duplicar">${ic('copy')}<span class="lbl-long">Duplicar</span></a>
      ${pode ? `<button class="btn btn-danger" id="dDel" title="Excluir">${ic('trash')}</button><a class="btn btn-primary" href="#/eventos/${e.id}/editar">${ic('pencil')}Editar</a>` : ''}`);
 
@@ -1286,6 +1288,8 @@ async function viewDetalhe(id) {
     card.addEventListener('drop', (x) => { x.preventDefault(); card.classList.remove('drag'); enviarAnexos(e, x.dataTransfer.files, pode); });
   }
   $('#dWa').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(textoEvento(e)), '_blank', 'noopener');
+  $('#dImg').onclick = (x) => enviarFicha('imagem', x.currentTarget, e, 'evento');
+  $('#dPdf').onclick = (x) => enviarFicha('pdf', x.currentTarget, e, 'evento');
   $('#dDel')?.addEventListener('click', () => excluirEvento(e, () => { location.hash = '#/eventos'; }));
   api.historico(e.id).then((hs) => { $('#dHist') && ($('#dHist').innerHTML = hs.length ? timeline(hs, false) : '<p class="muted small" style="margin:0">Sem registros.</p>'); })
     .catch(() => { $('#dHist') && ($('#dHist').innerHTML = '<p class="muted small">Não foi possível carregar o histórico.</p>'); });
@@ -2050,7 +2054,9 @@ async function viewDetalheAtv(id) {
   const d = a.dados || {}, ct = d.contrato || {}, pode = podeEditar(a);
   setPage(`Atividade Nº ${pad(a.numero)}`, `<a href="#/atividades" style="text-decoration:none;font-weight:600">← Atividades</a>`,
     `<button class="btn" id="dPrint" title="Imprimir">${ic('printer')}<span class="lbl-long">Imprimir</span></button>
-     <button class="btn" id="dWa" title="Compartilhar no WhatsApp">${ic('whats')}<span class="lbl-long">WhatsApp</span></button>
+     <button class="btn" id="dImg" title="Enviar a ficha como imagem (WhatsApp, e-mail…)">${ic('image')}<span class="lbl-long">Imagem</span></button>
+     <button class="btn" id="dPdf" title="Enviar a ficha em PDF (WhatsApp, e-mail…)">${ic('file')}<span class="lbl-long">PDF</span></button>
+     <button class="btn" id="dWa" title="Enviar o resumo em texto pelo WhatsApp">${ic('whats')}<span class="lbl-long">Texto</span></button>
      <a class="btn" href="#/atividades/${a.id}/duplicar" title="Duplicar">${ic('copy')}<span class="lbl-long">Duplicar</span></a>
      ${pode ? `<button class="btn btn-danger" id="dDel" title="Excluir">${ic('trash')}</button><a class="btn btn-primary" href="#/atividades/${a.id}/editar">${ic('pencil')}Editar</a>` : ''}`);
   const pct = compraTexto(a.valor_total, d.compras);
@@ -2090,6 +2096,8 @@ async function viewDetalheAtv(id) {
 
   $('#dPrint').onclick = () => window.print();
   $('#dWa').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(textoAtividade(a)), '_blank', 'noopener');
+  $('#dImg').onclick = (x) => enviarFicha('imagem', x.currentTarget, a, 'atividade');
+  $('#dPdf').onclick = (x) => enviarFicha('pdf', x.currentTarget, a, 'atividade');
   $('#dDel')?.addEventListener('click', () => excluirEvento(a, () => { location.hash = '#/atividades'; }, 'atividade'));
   carregarAnexos(a, pode);
   if (pode) {
@@ -2235,12 +2243,15 @@ function carregarLib(nome) {
   });
 }
 
-// Tira uma "foto" do relatório (sem botões), em largura fixa, fundo branco
-async function capturarRelatorio() {
+// Tira uma "foto" de um trecho da página (sem botões), em largura fixa, fundo branco
+async function capturarElemento(el, largura = 980) {
   await carregarLib('html2canvas');
   const box = document.createElement('div');
   box.className = 'captura';
-  const clone = $('.report').cloneNode(true);
+  box.style.width = largura + 'px';
+  const clone = el.cloneNode(true);
+  clone.classList.remove('print-only');
+  clone.style.display = 'block';
   clone.querySelectorAll('.report-actions, .no-print').forEach((x) => x.remove());
   box.append(clone);
   document.body.append(box);
@@ -2306,21 +2317,24 @@ document.addEventListener('click', (e) => {
   if (b) { soBaixar = true; b.closest('form')?.requestSubmit(); }
 });
 
-async function enviarRelatorio(formato, botao) {
+// formato: 'imagem' ou 'pdf'; oque: 'do relatório' / 'da ficha'
+async function gerarEEnviar(formato, botao, el, nomeBase, oque, largura) {
   const antes = botao.innerHTML;
   botao.disabled = true;
   botao.innerHTML = `<span class="spinner mini"></span>Gerando…`;
   try {
-    const canvas = await capturarRelatorio();
-    const nomeBase = `relatorio-eventos-dello-${hojeISO()}`;
-    if (formato === 'pdf') await oferecerArquivo(await canvasParaPdf(canvas), nomeBase + '.pdf', 'PDF do relatório');
+    const canvas = await capturarElemento(el, largura);
+    if (formato === 'pdf') await oferecerArquivo(await canvasParaPdf(canvas), nomeBase + '.pdf', 'PDF ' + oque);
     else {
       const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
-      await oferecerArquivo(blob, nomeBase + '.jpg', 'Imagem do relatório');
+      await oferecerArquivo(blob, nomeBase + '.jpg', 'Imagem ' + oque);
     }
   } catch (x) { toast(msgErro(x), 'err'); }
   finally { botao.disabled = false; botao.innerHTML = antes; }
 }
+const enviarRelatorio = (formato, botao) => gerarEEnviar(formato, botao, $('.report'), `relatorio-eventos-dello-${hojeISO()}`, 'do relatório', 980);
+const enviarFicha = (formato, botao, reg, tipo) => gerarEEnviar(formato, botao, $('.ficha'),
+  `${tipo}-${pad(reg.numero)}-${nomeArquivo(reg.nome).toLowerCase().slice(0, 50)}`, 'da ficha', 760);
 
 function exportarCsv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
