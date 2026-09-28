@@ -2189,7 +2189,9 @@ async function viewRelatorios() {
       <div class="report-actions no-print" style="margin-bottom:18px">
         <a class="btn" href="#/painel">${ic('x')}Sair</a>
         <button class="btn" id="rPrint">${ic('printer')}Imprimir / PDF</button>
-        <button class="btn" id="rWa">${ic('whats')}WhatsApp</button>
+        <button class="btn" id="rImg" title="Gera uma imagem do relatório para enviar pelo WhatsApp">${ic('image')}Enviar imagem</button>
+        <button class="btn" id="rPdf" title="Gera um PDF do relatório para enviar pelo WhatsApp ou e-mail">${ic('file')}Enviar PDF</button>
+        <button class="btn" id="rWa" title="Envia o resumo em texto pelo WhatsApp">${ic('whats')}WhatsApp (texto)</button>
         <button class="btn" id="rMail">${ic('mail')}E-mail</button>
         <button class="btn" id="rCsv">${ic('download')}Excel</button>
       </div>
@@ -2208,8 +2210,116 @@ async function viewRelatorios() {
     $('#rWa')?.addEventListener('click', () => window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank', 'noopener'));
     $('#rMail')?.addEventListener('click', () => { location.href = 'mailto:?subject=' + encodeURIComponent('Relatório de eventos — Dello') + '&body=' + encodeURIComponent(texto.replace(/\*/g, '')); });
     $('#rCsv')?.addEventListener('click', () => exportarCsv(lista));
+    $('#rImg')?.addEventListener('click', (x) => enviarRelatorio('imagem', x.currentTarget));
+    $('#rPdf')?.addEventListener('click', (x) => enviarRelatorio('pdf', x.currentTarget));
   }
   gerar();
+}
+
+/* ================================================================
+   Relatório como imagem ou PDF (para enviar pelo WhatsApp, e-mail…)
+   ================================================================ */
+const LIBS = {
+  html2canvas: ['https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', 'sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H', () => window.html2canvas],
+  jspdf: ['https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js', 'sha384-qovJwSBbRDPP5cEjCp8S0UP66wrvnjaa60XMOGzTNanrThcrGfXfnZkvgY8N1KT3', () => window.jspdf],
+};
+function carregarLib(nome) {
+  const [src, sri, pronto] = LIBS[nome];
+  if (pronto()) return Promise.resolve();
+  return new Promise((ok, falha) => {
+    const sc = document.createElement('script');
+    sc.src = src; sc.integrity = sri; sc.crossOrigin = 'anonymous';
+    sc.onload = () => ok();
+    sc.onerror = () => { sc.remove(); falha(new Error('Não foi possível carregar o gerador de arquivos. Verifique a internet e tente de novo.')); };
+    document.head.append(sc);
+  });
+}
+
+// Tira uma "foto" do relatório (sem botões), em largura fixa, fundo branco
+async function capturarRelatorio() {
+  await carregarLib('html2canvas');
+  const box = document.createElement('div');
+  box.className = 'captura';
+  const clone = $('.report').cloneNode(true);
+  clone.querySelectorAll('.report-actions, .no-print').forEach((x) => x.remove());
+  box.append(clone);
+  document.body.append(box);
+  try {
+    if (document.fonts?.ready) await document.fonts.ready;
+    const escala = Math.max(1, Math.min(2, 14000 / Math.max(1, box.offsetHeight)));
+    return await window.html2canvas(box, { scale: escala, backgroundColor: '#ffffff', useCORS: true, logging: false });
+  } finally { box.remove(); }
+}
+
+async function canvasParaPdf(canvas) {
+  await carregarLib('jspdf');
+  const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  const W = 190, H = 277, pxPorMm = canvas.width / W, pagPx = Math.floor(H * pxPorMm);
+  for (let y = 0, pg = 0; y < canvas.height; y += pagPx, pg++) {
+    const h = Math.min(pagPx, canvas.height - y);
+    const c = document.createElement('canvas');
+    c.width = canvas.width; c.height = h;
+    c.getContext('2d').drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+    if (pg) pdf.addPage();
+    pdf.addImage(c.toDataURL('image/jpeg', 0.9), 'JPEG', 10, 10, W, h / pxPorMm);
+  }
+  return pdf.output('blob');
+}
+
+function baixarArquivo(blob, nome) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = nome;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+// Arquivo pronto → janela para compartilhar (WhatsApp, e-mail…) ou baixar
+let soBaixar = false;
+async function oferecerArquivo(blob, nome, titulo) {
+  soBaixar = false;
+  const file = new File([blob], nome, { type: blob.type });
+  const podeCompartilhar = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+  const r = await modal({
+    title: `${titulo} ${/^Imagem/.test(titulo) ? 'pronta' : 'pronto'}`, icon: 'checkc', ok: podeCompartilhar ? 'Compartilhar' : 'Baixar arquivo',
+    text: podeCompartilhar
+      ? 'Clique em Compartilhar e escolha o WhatsApp (ou e-mail, Teams…). O arquivo vai anexado.'
+      : 'Este navegador não permite compartilhar arquivos direto. O arquivo será baixado: depois é só anexar no WhatsApp.',
+    body: `<div class="small muted">${esc(nome)} · ${tamanhoArq(blob.size)}</div>${podeCompartilhar ? '<button type="button" class="linkish" data-baixar style="margin-top:4px">Prefiro só baixar o arquivo</button>' : ''}`,
+    onSubmit: async () => {
+      if (podeCompartilhar && !soBaixar) {
+        try { await navigator.share({ files: [file], title: titulo }); return true; }
+        catch (e) { if (e.name === 'AbortError') return true; }
+      }
+      baixarArquivo(blob, nome);
+      return 'baixado';
+    },
+  });
+  if (r === 'baixado') {
+    modal({ title: 'Arquivo baixado', icon: 'download', cancel: false, ok: 'Entendi',
+      text: `"${nome}" está na pasta Downloads. Abra o WhatsApp e anexe o arquivo (clipe 📎 → Documento ou Fotos).`,
+      body: `<a class="btn btn-block" href="https://web.whatsapp.com/" target="_blank" rel="noopener">${ic('whats')}Abrir o WhatsApp Web</a>` });
+  }
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-baixar]');
+  if (b) { soBaixar = true; b.closest('form')?.requestSubmit(); }
+});
+
+async function enviarRelatorio(formato, botao) {
+  const antes = botao.innerHTML;
+  botao.disabled = true;
+  botao.innerHTML = `<span class="spinner mini"></span>Gerando…`;
+  try {
+    const canvas = await capturarRelatorio();
+    const nomeBase = `relatorio-eventos-dello-${hojeISO()}`;
+    if (formato === 'pdf') await oferecerArquivo(await canvasParaPdf(canvas), nomeBase + '.pdf', 'PDF do relatório');
+    else {
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
+      await oferecerArquivo(blob, nomeBase + '.jpg', 'Imagem do relatório');
+    }
+  } catch (x) { toast(msgErro(x), 'err'); }
+  finally { botao.disabled = false; botao.innerHTML = antes; }
 }
 
 function exportarCsv(lista) {
