@@ -164,10 +164,12 @@ const tiposDe = (evs, base = TIPOS) => [...base, ...uniq((evs || []).map((e) => 
 // Compras do cliente nos últimos 3 anos (valor por ano) e quanto o investimento representa
 function comprasDe(d) {
   const arr = Array.isArray(d?.compras) ? d.compras.filter((c) => c && typeof c === 'object') : [];
-  // registros com valores guardam os anos com que foram preenchidos; sem valores, usa os 3 anos até o atual
-  if (arr.length === 3 && arr.some((c) => Number(c.valor) > 0)) return arr.map((c) => ({ ano: Math.round(Number(c.ano)) || 0, valor: Math.max(0, Number(c.valor) || 0) }));
-  const y = new Date().getFullYear();
-  return [y - 2, y - 1, y].map((ano) => ({ ano, valor: 0 }));
+  const lidos = arr.map((c) => ({ ano: Math.round(Number(c.ano)) || 0, valor: Math.max(0, Number(c.valor) || 0) }));
+  // sempre os 3 anos até o atual (ex.: 2024, 2025, 2026), cada valor no seu ano
+  const y = new Date().getFullYear(), anos = [y - 2, y - 1, y];
+  // valor digitado num ano que saiu da janela: mantém os anos originais para não perder a informação
+  if (lidos.length === 3 && lidos.some((c) => c.valor > 0 && !anos.includes(c.ano))) return lidos;
+  return anos.map((ano) => ({ ano, valor: lidos.find((c) => c.ano === ano)?.valor || 0 }));
 }
 function analiseCompra(total, compras) {
   const cs = (compras || []).filter((c) => Number(c.valor) > 0);
