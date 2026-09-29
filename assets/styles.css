@@ -885,3 +885,40 @@ html.tema-anim, html.tema-anim *, html.tema-anim *::before, html.tema-anim *::af
 .auth-form .tema-toggle { position: absolute; top: 20px; right: 20px; }
 @media print { .tema-toggle { display: none !important; } }
 @media (prefers-reduced-motion: reduce) { .tema-toggle *, html.tema-anim * { transition: none !important; } }
+
+/* ---------- forma de envio da entrega ---------- */
+.seg.seg4 { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
+.seg.seg4 label { padding: 10px 12px; }
+.seg.seg4 label > svg.i { margin: 0 2px; flex: none; }
+@media (max-width: 900px) { .seg.seg4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.envio-campos { margin-bottom: 18px; padding: 14px; border-radius: 12px; background: var(--brand-50); border: 1px dashed var(--warm-border); }
+.envio-det { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--brand-50); }
+.envio-det > svg.i { color: var(--brand-700); width: 22px; height: 22px; flex: none; }
+
+/* ---------- bolinha "realizado" ---------- */
+.tbl th.c-done-h { text-align: center; width: 1%; padding-left: 6px; padding-right: 14px; color: var(--green); }
+.tbl th.c-done-h svg.i { width: 18px; height: 18px; vertical-align: middle; }
+.tbl td.c-done { text-align: center; width: 1%; padding-left: 6px; padding-right: 14px; }
+.tbl td.c-per { min-width: 112px; }
+.done-dot {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 2px solid var(--switch-off); background: var(--card); color: transparent;
+  transition: background .2s, border-color .2s, color .2s, transform .15s, box-shadow .2s;
+}
+.done-dot svg.i { width: 16px; height: 16px; stroke-width: 3; }
+.done-dot:hover { border-color: var(--green); color: var(--green); box-shadow: 0 0 0 4px var(--green-bg); }
+.done-dot:active { transform: scale(.88); }
+.done-dot.on { background: var(--green); border-color: var(--green); color: #fff; }
+.done-dot.on:hover { box-shadow: 0 0 0 4px var(--green-bg); color: #fff; }
+.done-dot.on svg.i { animation: done-pop .35s cubic-bezier(.45, 1.45, .5, 1); }
+.done-dot.ro { cursor: default; }
+.done-dot.ro:not(.on):hover { border-color: var(--switch-off); color: transparent; box-shadow: none; }
+.done-dot.busy { opacity: .6; pointer-events: none; }
+.done-dot:focus-visible { outline: 3px solid rgba(26, 160, 90, .35); outline-offset: 2px; }
+@keyframes done-pop { from { transform: scale(0); } to { transform: scale(1); } }
+.tag.feito { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; background: var(--green-bg); color: var(--ok-ink); }
+.tag.feito svg.i { width: 13px; height: 13px; }
+@media (max-width: 640px) {
+  .tbl.cards td.c-done { grid-column: 2; grid-row: 3; justify-self: end; width: auto; }
+}
+@media (max-width: 1400px) { .hide-md { display: none; } }
