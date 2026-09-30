@@ -2020,6 +2020,11 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
     const emailOk = (x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x);
     if (!f.nome) return erro('nome', `Informe o nome d${K.o} ${K.sing}.`);
     if (!f.tipo) return erro('tipo-outro', `Escreva o tipo d${K.o} ${K.sing}.`);
+    const dataRuim = $$('input[type=date]', frm).find((i) => i.value && !/^(19|20)\d\d-/.test(i.value));
+    if (dataRuim) {
+      dataRuim.classList.add('invalid'); dataRuim.focus(); dataRuim.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      toast(`Confira o ano da data: ${fdate(dataRuim.value)}. O ano precisa ter 4 dígitos (ex.: 2027).`, 'err'); return;
+    }
     if (f.data_inicio && f.data_fim && f.data_fim < f.data_inicio) return erro('fim', A ? 'O prazo de entrega é anterior à data de início.' : 'A data de término é anterior à data de início.');
     const dd = f.dados;
     if (A) {
@@ -2231,6 +2236,18 @@ async function viewDetalheAtv(id) {
 /* ================================================================
    Relatórios
    ================================================================ */
+const COLS_REL = [['cliente', 'Cliente'], ['local', 'Local'], ['tipo', 'Tipo'], ['periodo', 'Período'], ['gerente', 'Gerente'],
+  ['situacao', 'Situação'], ['realizado', 'Realizado'], ['pct', '% compras']];
+const ORDENS_REL = [['recente', 'Data: mais recente primeiro'], ['antiga', 'Data: mais antiga primeiro'], ['numero', 'Nº do cadastro'], ['valor', 'Valor: maior primeiro']];
+// Eventos sem data ficam sempre no fim
+function ordenarRel(lista, ordem) {
+  const l = [...lista];
+  if (ordem === 'numero') return l.sort((a, b) => b.numero - a.numero);
+  if (ordem === 'valor') return l.sort((a, b) => (Number(b.valor_total) || 0) - (Number(a.valor_total) || 0));
+  const dir = ordem === 'antiga' ? 1 : -1;
+  return l.sort((a, b) => (!a.data_inicio) - (!b.data_inicio) || dir * String(a.data_inicio || '').localeCompare(String(b.data_inicio || '')) || b.numero - a.numero);
+}
+
 async function viewRelatorios() {
   setPage('Relatórios', 'Monte, imprima e compartilhe relatórios de eventos');
   carregando();
@@ -2238,6 +2255,9 @@ async function viewRelatorios() {
   const gerentes = uniq(evs.map((e) => e.gerente));
   const R = S.rel || (S.rel = { por: 'situacao', val: '', de: '', ate: '', formato: 'resumido' });
   R.sits ||= [...SIT_ORDEM];
+  R.ordem ||= 'recente';
+  R.feito ||= 'todos';
+  R.cols ||= COLS_REL.map(([k]) => k);
 
   view().innerHTML = `<div class="card no-print">
     <div class="rep-filters">
@@ -2245,10 +2265,16 @@ async function viewRelatorios() {
         ${[['situacao', 'Situação'], ['evento', 'Evento'], ['cliente', 'Cliente'], ['gerente', 'Gerente'], ['tipo', 'Tipo de evento'], ['periodo', 'Data a ser realizado']].map(([v, l]) => `<option value="${v}" ${R.por === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div id="rParam"></div>
       <div class="field"><label>Formato</label><select id="rFmt"><option value="resumido" ${R.formato === 'resumido' ? 'selected' : ''}>Resumido</option><option value="detalhado" ${R.formato === 'detalhado' ? 'selected' : ''}>Detalhado (todos os itens)</option></select></div>
+      <div class="field"><label>Ordenar por</label><select id="rOrdem">${ORDENS_REL.map(([v, l]) => `<option value="${v}" ${R.ordem === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <button class="btn btn-primary" id="rGerar">${ic('file')}Gerar relatório</button>
     </div>
-    <div class="rep-sits"><span class="lbl">Incluir as situações:</span>
+    <div class="rep-sits"><span class="lbl">Situações:</span>
       ${SIT_ORDEM.map((s) => `<label class="chk-sit"><input type="checkbox" value="${s}" ${R.sits.includes(s) ? 'checked' : ''}><span class="d" style="background:${SIT[s].hex}"></span>${SIT[s].label}</label>`).join('')}
+      <span class="rep-sep"></span><span class="lbl">Realizados:</span>
+      ${[['todos', 'Todos'], ['sim', 'Só os realizados'], ['nao', 'Só os não realizados']].map(([v, l]) => `<label class="chk-sit"><input type="radio" name="rFeito" value="${v}" ${R.feito === v ? 'checked' : ''}>${l}</label>`).join('')}
+    </div>
+    <div class="rep-sits rep-cols"><span class="lbl">Informações no relatório:</span>
+      ${COLS_REL.map(([k, l]) => `<label class="chk-sit"><input type="checkbox" value="${k}" ${R.cols.includes(k) ? 'checked' : ''}>${l}</label>`).join('')}
     </div></div>
     <div id="rOut"></div>`;
 
@@ -2265,8 +2291,11 @@ async function viewRelatorios() {
   $('#rPor').onchange = (e) => { R.por = e.target.value; R.val = ''; param(); };
   $('#rFmt').onchange = (e) => { R.formato = e.target.value; gerar(); };
   $('#rGerar').onclick = () => gerar();
-  $$('.rep-sits input').forEach((c) => c.addEventListener('change', () => {
-    R.sits = $$('.rep-sits input:checked').map((x) => x.value);
+  $('#rOrdem').onchange = (e) => { R.ordem = e.target.value; gerar(); };
+  $$('input[name=rFeito]').forEach((c) => c.addEventListener('change', () => { R.feito = c.value; gerar(); }));
+  $$('.rep-cols input').forEach((c) => c.addEventListener('change', () => { R.cols = $$('.rep-cols input:checked').map((x) => x.value); gerar(); }));
+  $$('.rep-sits:not(.rep-cols) input[type=checkbox]').forEach((c) => c.addEventListener('change', () => {
+    R.sits = $$('.rep-sits:not(.rep-cols) input[type=checkbox]:checked').map((x) => x.value);
     if (!R.sits.length) { c.checked = true; R.sits = [c.value]; toast('Deixe pelo menos uma situação marcada.', 'err'); }
     gerar();
   }));
@@ -2285,9 +2314,11 @@ async function viewRelatorios() {
       lista = lista.filter((e) => e.data_inicio && (!R.de || (e.data_fim || e.data_inicio) >= R.de) && (!R.ate || e.data_inicio <= R.ate));
       desc = 'Período: ' + (R.de || R.ate ? `${fdate(R.de) || 'início'} a ${fdate(R.ate) || 'hoje em diante'}` : 'todas as datas');
     }
-    lista = lista.filter((e) => R.sits.includes(e.situacao));
+    lista = lista.filter((e) => R.sits.includes(e.situacao) && (R.feito === 'todos' || !!e.realizado === (R.feito === 'sim')));
     if (R.sits.length < SIT_ORDEM.length) desc += ' · Situações: ' + R.sits.map((s) => SIT[s].label).join(', ');
-    lista = [...lista].sort((a, b) => (a.data_inicio || '9999').localeCompare(b.data_inicio || '9999'));
+    if (R.feito !== 'todos') desc += R.feito === 'sim' ? ' · só realizados' : ' · só não realizados';
+    lista = ordenarRel(lista, R.ordem);
+    const C = (k) => R.cols.includes(k);
     const total = soma(lista, (e) => e.valor_total);
     const vs = (s) => soma(lista.filter((e) => e.situacao === s), (e) => e.valor_total);
 
@@ -2301,9 +2332,17 @@ async function viewRelatorios() {
     }
     const nomeGrupo = (k) => R.por === 'situacao' ? SIT[k]?.label : k;
 
-    const tabela = (l) => `<div style="overflow-x:auto"><table class="mini"><thead><tr><th>Nº</th><th>Evento</th><th>Tipo</th><th>Período</th><th>Gerente</th><th>Situação</th><th class="r" title="Investimento em relação às compras do cliente no último ano informado">% compras</th><th class="r">Valor</th></tr></thead>
-      <tbody>${l.map((e) => `<tr><td class="seq">${pad(e.numero)}</td><td><b>${esc(e.nome)}</b>${clienteTexto(clienteDe(e)) ? `<div class="small">${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="small muted">${esc(e.local)}</div></td><td>${esc(e.tipo)}</td><td class="nowrap">${periodo(e)}</td><td>${esc(e.gerente)}</td><td>${pill(e.situacao)}</td><td class="r nowrap">${(() => { const x = analiseCompra(e.valor_total, e.dados?.compras); return x ? `${pctFmt(x.pctUlt)}<div class="small muted">de ${x.ultAno}</div>` : '—'; })()}</td><td class="r">${brl(e.valor_total)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="7">${l.length} evento(s)</td><td class="r">${brl(soma(l, (e) => e.valor_total))}</td></tr></tfoot></table></div>`;
+    const extras = [
+      ['tipo', 'Tipo', '', (e) => esc(e.tipo)],
+      ['periodo', 'Período', '', (e) => `<span class="nowrap">${periodo(e)}</span>`],
+      ['gerente', 'Gerente', '', (e) => esc(e.gerente)],
+      ['situacao', 'Situação', '', (e) => pill(e.situacao)],
+      ['realizado', 'Realizado', 'c', (e) => e.realizado ? `<span class="tag feito">${ic('check')}Sim</span>` : '<span class="muted">Não</span>'],
+      ['pct', '% compras', 'r nowrap', (e) => { const x = analiseCompra(e.valor_total, e.dados?.compras); return x ? `${pctFmt(x.pctUlt)}<div class="small muted">de ${x.ultAno}</div>` : '—'; }],
+    ].filter(([k]) => C(k));
+    const tabela = (l) => `<div style="overflow-x:auto"><table class="mini"><thead><tr><th>Nº</th><th>Evento</th>${extras.map(([k, t, c]) => `<th class="${c}"${k === 'pct' ? ' title="Investimento em relação às compras do cliente no último ano informado"' : ''}>${t}</th>`).join('')}<th class="r">Valor</th></tr></thead>
+      <tbody>${l.map((e) => `<tr><td class="seq">${pad(e.numero)}</td><td><b>${esc(e.nome)}</b>${C('cliente') && clienteTexto(clienteDe(e)) ? `<div class="small">${esc(clienteTexto(clienteDe(e)))}</div>` : ''}${C('local') && e.local ? `<div class="small muted">${esc(e.local)}</div>` : ''}</td>${extras.map(([, , c, f]) => `<td class="${c}">${f(e)}</td>`).join('')}<td class="r">${brl(e.valor_total)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="${2 + extras.length}">${l.length} evento(s)</td><td class="r">${brl(soma(l, (e) => e.valor_total))}</td></tr></tfoot></table></div>`;
     const detalhe = (e) => `<div class="rep-ev"><div class="h"><span class="seq">Nº ${pad(e.numero)}</span><b>${esc(e.nome)}</b>${clienteTexto(clienteDe(e)) ? `<span class="tag">${esc(clienteTexto(clienteDe(e)))}</span>` : ''}${pill(e.situacao)}<span class="sp"></span><span class="v">${brl(e.valor_total)}</span></div>
       <div class="i">${esc(e.tipo)} · ${periodo(e)} · ${esc(e.local || 'Local a definir')} · Gerente: ${esc(e.gerente || '—')}${(e.dados?.envolvidos || []).length ? ' · Envolvidos: ' + e.dados.envolvidos.map(esc).join(', ') : ''}</div>
       ${temEntrega(e.dados?.entrega) ? `<div class="i"><b>Entrega:</b> ${esc(entregaTexto(e.dados.entrega))}</div>` : ''}
