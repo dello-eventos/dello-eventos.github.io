@@ -2465,6 +2465,8 @@ const ligarSwitch = () => $$('input[name=relTipo]').forEach((r) => r.addEventLis
 const COLS_RAT = [['cliente', 'Cliente'], ['tipo', 'Tipo'], ['datas', 'Início · Prazo'], ['gerente', 'Gerente'], ['servicos', 'Serviços'],
   ['responsavel', 'Responsável'], ['conclusao', 'Conclusão'], ['situacao', 'Situação'], ['realizado', 'Realizada'], ['pct', '% compras']];
 
+const legendaSit = () => `<div class="sit-leg"><b>Situação:</b>${SIT_ORDEM.map((x) => `<span>${sitDot(x)}${SIT[x].label}</span>`).join('')}</div>`;
+
 async function viewRelAtividades() {
   carregando();
   const lst = S.atividades = await api.listAtividades();
@@ -2520,7 +2522,7 @@ async function viewRelAtividades() {
       ['servicos', 'Serviços', '', (a) => esc(uniq((a.dados?.servicos || []).map((x) => x.tipo)).join(', ') || '—')],
       ['responsavel', 'Responsável', '', (a) => esc(responsaveisDe(a).join(', ') || '—')],
       ['conclusao', 'Conclusão', 'nowrap', (a) => execDe(a)?.conclusao ? fdate(execDe(a).conclusao) : '<span class="muted">—</span>'],
-      ['situacao', 'Situação', '', (a) => pill(a.situacao)],
+      ['situacao', 'Situação', 'c', (a) => sitDot(a.situacao)],
       ['realizado', 'Realizada', 'c', (a) => a.realizado ? `<span class="tag feito">${ic('check')}Sim</span>` : '<span class="muted">Não</span>'],
       ['pct', '% compras', 'r nowrap', (a) => { const x = analiseCompra(a.valor_total, a.dados?.compras); return x ? `${pctFmt(x.pctUlt)}<div class="small muted">de ${x.ultAno}</div>` : '—'; }],
     ].filter(([k]) => C(k));
@@ -2546,7 +2548,7 @@ async function viewRelAtividades() {
       <div class="report-head"><img src="assets/logo-dello.png" alt="Dello"><div><h2>Relatório de atividades</h2><div class="small muted">${esc(desc)}${R.formato === 'detalhado' ? ' · detalhado' : ''}</div></div>
         <span class="sp"></span><div class="meta">Gerado em ${fdt(new Date())}<br>por ${esc(S.me.nome)}</div></div>
       ${lista.length ? `<div class="report-sum"><div><span>Atividades</span><b>${lista.length}</b></div><div><span>Concluídas</span><b>${conc}</b></div><div><span>Realizadas</span><b>${lista.filter((a) => a.realizado).length}</b></div><div class="hl"><span>Valor total</span><b>${brl(total)}</b></div></div>
-        ${tabela}${R.formato === 'detalhado' ? lista.map(detalhe).join('') : ''}` : vazio('search', 'Nenhuma atividade encontrada', 'Ajuste os filtros e gere novamente.')}
+        ${C('situacao') ? legendaSit() : ''}${tabela}${R.formato === 'detalhado' ? lista.map(detalhe).join('') : ''}` : vazio('search', 'Nenhuma atividade encontrada', 'Ajuste os filtros e gere novamente.')}
     </div>`;
 
     const texto = `*Relatório de atividades — Dello*\n${desc}\n${lista.length} atividade(s) · Total ${brl(total)}\n\n` +
@@ -2652,7 +2654,7 @@ async function viewRelatorios() {
       ['tipo', 'Tipo', '', (e) => esc(e.tipo)],
       ['periodo', 'Período', '', (e) => `<span class="nowrap">${periodo(e)}</span>`],
       ['gerente', 'Gerente', '', (e) => esc(e.gerente)],
-      ['situacao', 'Situação', '', (e) => pill(e.situacao)],
+      ['situacao', 'Situação', 'c', (e) => sitDot(e.situacao)],
       ['realizado', 'Realizado', 'c', (e) => e.realizado ? `<span class="tag feito">${ic('check')}Sim</span>` : '<span class="muted">Não</span>'],
       ['pct', '% compras', 'r nowrap', (e) => { const x = analiseCompra(e.valor_total, e.dados?.compras); return x ? `${pctFmt(x.pctUlt)}<div class="small muted">de ${x.ultAno}</div>` : '—'; }],
     ].filter(([k]) => C(k));
@@ -2679,6 +2681,7 @@ async function viewRelatorios() {
         <span class="sp"></span><div class="meta">Gerado em ${fdt(new Date())}<br>por ${esc(S.me.nome)}</div></div>
       ${lista.length ? `
       <div class="report-sum"><div><span>Eventos</span><b>${lista.length}</b></div><div><span>Aprovado</span><b>${brl(vs('aprovado'))}</b></div><div><span>Em análise</span><b>${brl(vs('analise'))}</b></div><div class="hl"><span>Valor total</span><b>${brl(total)}</b></div></div>
+      ${C('situacao') ? legendaSit() : ''}
       ${grupos.map(([k, l]) => `${k != null ? `<div class="grp-h">${esc(nomeGrupo(k))}<span class="sp"></span><span class="num">${brl(soma(l, (e) => e.valor_total))}</span></div>` : ''}
         ${tabela(l)}${R.formato === 'detalhado' ? l.map(detalhe).join('') : ''}`).join('')}`
       : vazio('search', 'Nenhum evento encontrado', 'Ajuste os filtros e gere novamente.')}
