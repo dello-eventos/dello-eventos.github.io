@@ -53,7 +53,7 @@ const REP = {
 REP.servicosAtv = { add: 'Adicionar serviço', titulo: 'Serviço', campos: [
   { k: 'tipo', l: 'Tipo', t: 'select', opts: SERVICOS_ATV },
   { k: 'formato', l: 'Formato / descrição', ph: 'Ex.: página inteira 21×28 cm' },
-  { k: 'responsavel', l: 'Responsável pela execução', ph: 'Nome ou empresa' },
+  { k: 'responsavel', l: 'Responsável pela execução', ph: 'Nome igual ao cadastro do usuário', list: 'dl-resp' },
   { k: 'email', l: 'E-mail para envio', t: 'email', ph: 'nome@empresa.com.br' },
 ] };
 
@@ -98,6 +98,7 @@ const P = {
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
   chevL: '<path d="m15 18-6-6 6-6"/>',
   chevR: '<path d="m9 18 6-6-6-6"/>',
+  repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
   monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
   megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
   truck: '<path d="M1 4h13v12H1zM14 8h4.5L22 11.5V16h-8z"/><circle cx="5.5" cy="18" r="2"/><circle cx="17.5" cy="18" r="2"/>',
@@ -414,8 +415,8 @@ function SupaAPI() {
       }
       return chk(await sb.from('eventos').insert(campos(ev)).select().single());
     },
-    async marcarRealizado(id, valor) {
-      const r = chk(await sb.from('eventos').update({ realizado: !!valor }).eq('id', id).select('id, realizado'));
+    async marcarRealizado(id, valor, kind = 'evento') {
+      const r = chk(await sb.from(kind === 'atividade' ? 'atividades' : 'eventos').update({ realizado: !!valor }).eq('id', id).select('id, realizado'));
       if (!r.length) throw new Error('permission denied');
       return r[0];
     },
@@ -448,6 +449,7 @@ function SupaAPI() {
       const r = chk(await sb.from('atividades').delete().eq('id', id).select('id'));
       if (!r.length) throw new Error('permission denied');
     },
+    async registrarExecucao(id, conclusao, obs) { return chk(await sb.rpc('registrar_execucao', { atividade: id, conclusao: conclusao || null, obs: obs || '' })); },
     async listPerfis() { return chk(await sb.from('perfis').select('*').order('nome')); },
     async updatePerfil(id, patch) {
       const r = chk(await sb.from('perfis').update(patch).eq('id', id).select());
@@ -495,7 +497,9 @@ function DemoAPI() {
   const salvar = () => store.set(KEY, JSON.stringify(db));
   const perfil = (id) => db.perfis.find((p) => p.id === id);
   const isAdmin = () => perfil(atual)?.papel === 'admin' && perfil(atual)?.ativo;
-  const podeEditar = (ev) => isAdmin() || ev.criado_por === atual;
+  const podeEditar = (ev) => perfil(atual)?.papel !== 'executor' && (isAdmin() || ev.criado_por === atual);
+  const responsavelDemo = (a) => (a?.dados?.servicos || []).some((x) => String(x.responsavel || '').split(/\s*(?:[,/;&+]|\s+e\s+)\s*/)
+    .some((n) => n.trim().toLowerCase() === String(perfil(atual)?.nome || '').trim().toLowerCase() && n.trim()));
   const visivel = (ev) => ev.visibilidade !== 'privado' || ev.criado_por === atual || isAdmin();
   const histVisivel = (h) => !h.evento_privado || h.evento_dono === atual || isAdmin();
   const anexosMem = {};
@@ -512,6 +516,7 @@ function DemoAPI() {
     const perfis = [
       { id: 'demo-admin', nome: 'Administrador Demo', email: 'admin@exemplo.com', papel: 'admin', ativo: true, criado_em: new Date().toISOString() },
       { id: 'demo-user', nome: 'Gerente Comercial Demo', email: 'gerente@exemplo.com', papel: 'usuario', ativo: true, criado_em: new Date().toISOString() },
+      { id: 'demo-exec', nome: 'André', email: 'andre@exemplo.com', papel: 'executor', ativo: true, criado_em: new Date().toISOString() },
       { id: 'demo-pend', nome: 'Novo Colaborador', email: 'novo@exemplo.com', papel: 'usuario', ativo: false, criado_em: new Date().toISOString() },
     ];
     const mk = (numero, por, o) => {
@@ -590,13 +595,13 @@ function DemoAPI() {
       salvar();
       return clone(novo);
     },
-    async marcarRealizado(id, valor) {
-      const e = db.eventos.find((x) => x.id === id);
+    async marcarRealizado(id, valor, kind = 'evento') {
+      const e = (kind === 'atividade' ? db.atividades : db.eventos).find((x) => x.id === id);
       if (!e || !podeEditar(e)) negar();
       const antes = !!e.realizado;
       if (antes === !!valor) return { id, realizado: antes };
       e.realizado = !!valor; e.atualizado_por = atual; e.atualizado_em = new Date().toISOString();
-      log('alterou', e, { realizado: [antes, !!valor] });
+      log('alterou', e, { realizado: [antes, !!valor] }, kind === 'atividade' ? 'atividade' : undefined);
       salvar();
       return { id, realizado: e.realizado };
     },
@@ -618,6 +623,7 @@ function DemoAPI() {
         if (i < 0) throw new Error('Atividade não encontrada.');
         const old = db.atividades[i];
         if (!podeEditar(old)) negar();
+        if (old.dados?.execucao) campos.dados.execucao = old.dados.execucao; else delete campos.dados.execucao;
         const novo = { ...old, ...campos, atualizado_por: atual, atualizado_em: agora };
         const det = {};
         ['situacao', 'nome', 'tipo', 'gerente', 'data_inicio', 'data_fim', 'valor_total', 'visibilidade'].forEach((k) => { if ((old[k] ?? null) !== (novo[k] ?? null)) det[k] = [old[k] ?? null, novo[k] ?? null]; });
@@ -628,7 +634,8 @@ function DemoAPI() {
         salvar();
         return clone(novo);
       }
-      const novo = { id: uid(), numero: ++db.seqA, ...campos, criado_por: atual, criado_em: agora, atualizado_por: atual, atualizado_em: agora };
+      delete campos.dados.execucao;
+      const novo = { id: uid(), numero: ++db.seqA, realizado: false, ...campos, criado_por: atual, criado_em: agora, atualizado_por: atual, atualizado_em: agora };
       db.atividades.push(novo);
       log('criou', novo, {}, 'atividade');
       salvar();
@@ -640,6 +647,16 @@ function DemoAPI() {
       db.atividades = db.atividades.filter((x) => x.id !== id);
       log('excluiu', a, { valor_total: a.valor_total }, 'atividade');
       salvar();
+    },
+    async registrarExecucao(id, conclusao, obs) {
+      const a = db.atividades.find((x) => x.id === id);
+      if (!a || !(podeEditar(a) || responsavelDemo(a))) negar();
+      const antes = a.dados?.execucao?.conclusao || null;
+      a.dados = { ...(a.dados || {}), execucao: (conclusao || obs) ? { conclusao: conclusao || null, obs: obs || '', por: perfil(atual)?.nome, por_id: atual, em: new Date().toISOString() } : null };
+      a.atualizado_por = atual; a.atualizado_em = new Date().toISOString();
+      if (antes !== (conclusao || null)) log('alterou', a, { conclusao: [antes, conclusao || null] }, 'atividade');
+      salvar();
+      return clone(a.dados.execucao);
     },
     async listPerfis() { return clone(db.perfis).sort((a, b) => a.nome.localeCompare(b.nome)); },
     async updatePerfil(id, patch) {
@@ -657,7 +674,7 @@ function DemoAPI() {
     async listarAnexos(id) { return (anexosMem[id] || []).slice(); },
     async enviarAnexo(id, arquivo, nome) {
       const ev = db.eventos.find((x) => x.id === id) || db.atividades.find((x) => x.id === id);
-      if (!ev || !podeEditar(ev)) negar();
+      if (!ev || !(podeEditar(ev) || responsavelDemo(ev))) negar();
       const n = `${Date.now()}-${nome}`;
       (anexosMem[id] ||= []).push({ path: `${id}/${n}`, nome: n, tipo: arquivo.type, tamanho: arquivo.size, criado_em: new Date().toISOString(), url: URL.createObjectURL(arquivo) });
     },
@@ -678,7 +695,17 @@ let api;
 const S = { me: null, perfis: [], eventos: [], atividades: [], filtrosAtv: { q: '', sit: '', tipo: '', meus: false }, dirty: false, recovery: false, filtros: { q: '', sit: '', tipo: '', gerente: '', meus: false }, anoPainel: String(new Date().getFullYear()) };
 const root = $('#root');
 const isAdmin = () => S.me?.papel === 'admin';
-const podeEditar = (ev) => !!S.me && (isAdmin() || ev.criado_por === S.me.id);
+const isExecutor = () => S.me?.papel === 'executor';
+const PAPEIS = { admin: 'Administrador', usuario: 'Usuário', executor: 'Executor' };
+const podeEditar = (ev) => !!S.me && !isExecutor() && (isAdmin() || ev.criado_por === S.me.id);
+// Responsável pela execução: nomes escritos nos serviços da atividade (aceita "Ana / Bruno", "Ana e Bruno"…)
+const normNome = (t) => String(t || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const responsaveisDe = (a) => uniq((a?.dados?.servicos || []).flatMap((x) => String(x.responsavel || '').split(/\s*(?:[,/;&+]|\s+e\s+)\s*/)).map((x) => x.trim()));
+const souResponsavel = (a) => !!S.me && responsaveisDe(a).some((n) => normNome(n) === normNome(S.me.nome));
+const podeExecutar = (a) => podeEditar(a) || souResponsavel(a);
+const execDe = (a) => (a?.dados?.execucao && typeof a.dados.execucao === 'object') ? a.dados.execucao : null;
+const sitDot = (s) => `<span class="sit-dot" style="background:${SIT[s]?.hex || '#999'}" title="${SIT[s]?.label || ''}" aria-label="${SIT[s]?.label || ''}"></span>`;
+const repIco = (r) => r?.dados?.repetir ? ` <span class="rep-ico" title="Repete todos os anos">${ic('repeat')}</span>` : '';
 
 /* Aplicativo instalável (ícone na área de trabalho / tela inicial) */
 let promptInstalar = null;
@@ -863,12 +890,13 @@ function renderShell() {
   const pend = S.perfis.filter((p) => !p.ativo).length;
   const demoBar = DEMO ? `<div class="demo-bar no-print">${ic('info')}
       <span><b>Modo demonstração.</b> Os dados ficam só neste navegador até o banco ser conectado.</span><span class="sp"></span>
-      <label>Ver como:</label><select id="demoUser">${S.perfis.filter((p) => p.ativo).map((p) => `<option value="${p.id}" ${p.id === S.me.id ? 'selected' : ''}>${esc(p.nome)} (${p.papel === 'admin' ? 'admin' : 'usuário'})</option>`).join('')}</select>
+      <label>Ver como:</label><select id="demoUser">${S.perfis.filter((p) => p.ativo).map((p) => `<option value="${p.id}" ${p.id === S.me.id ? 'selected' : ''}>${esc(p.nome)} (${(PAPEIS[p.papel] || '').toLowerCase()})</option>`).join('')}</select>
       <button class="btn btn-sm" id="demoReset" style="background:#243152;color:#fff;border-color:#34436a">Restaurar exemplo</button></div>` : '';
+  document.body.classList.toggle('papel-executor', isExecutor());
   root.innerHTML = `<div class="shell" id="shell">
     <aside class="side">
       <a class="brand" href="#/painel"><img src="assets/logo-dello.png" alt="Dello"><span>Gestão de Eventos</span></a>
-      <div class="nav-novo">
+      <div class="nav-novo ${isExecutor() ? 'hidden' : ''}">
         <span class="grp">Cadastrar</span>
         <a href="#/eventos/novo" data-r="novo" title="Cadastrar um novo evento">${ic('plus')}Evento</a>
         <a href="#/atividades/nova" data-r="nova-atv" title="Cadastrar uma nova atividade">${ic('plus')}Atividade</a>
@@ -887,7 +915,7 @@ function renderShell() {
       ${appInstalado() ? '' : `<button type="button" class="nav-inst" id="btnInstalar">${ic('monitor')}<span>Instalar aplicativo<small>Ícone na área de trabalho ou no celular</small></span></button>`}
       <div class="me">
         <div class="avatar">${esc(iniciais(S.me.nome))}</div>
-        <div class="who"><b title="${esc(S.me.nome)}">${esc(S.me.nome)}</b><span class="small muted">${isAdmin() ? 'Administrador' : 'Usuário'}</span></div>
+        <div class="who"><b title="${esc(S.me.nome)}">${esc(S.me.nome)}</b><span class="small muted">${PAPEIS[S.me.papel] || 'Usuário'}</span></div>
         ${DEMO ? '' : `<button class="btn btn-ghost icon-btn" id="btnSenha" title="Alterar senha" aria-label="Alterar senha">${ic('key')}</button>
         <button class="btn btn-ghost icon-btn" id="btnSair" title="Sair" aria-label="Sair">${ic('logout')}</button>`}
       </div>
@@ -1017,9 +1045,16 @@ window.addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault
    ================================================================ */
 async function viewPainel() {
   setPage('Painel', `Olá, ${esc(primeiroNome(S.me.nome))}. Aqui está o resumo dos eventos.`,
-    `<a class="btn btn-primary" href="#/eventos/novo">${ic('plus')}<span>Novo <span class="lbl-long">evento</span></span></a>`);
+    isExecutor() ? '' : `<a class="btn btn-primary" href="#/eventos/novo">${ic('plus')}<span>Novo <span class="lbl-long">evento</span></span></a>`);
   carregando();
   const evs = S.eventos = await api.listEventos();
+  try { S.atividades = await api.listAtividades(); } catch { /* opcional */ }
+  const minhas = (S.atividades || []).filter((a) => souResponsavel(a) && !a.realizado);
+  const conferir = isExecutor() ? [] : (S.atividades || []).filter((a) => podeEditar(a) && execDe(a)?.conclusao && !a.realizado);
+  const avisos = () => `${minhas.length ? `<div class="card exec-painel"><div class="card-h"><h3>${ic('megaphone')}Atividades para você executar</h3><span class="sp"></span><a class="btn btn-sm" href="#/atividades">Ver todas</a></div>
+      <div class="list-ev">${minhas.slice(0, 8).map((a) => `<a href="#/atividades/${a.id}"><div class="datebox"><b>${(a.data_fim || '').slice(8, 10) || '—'}</b><span>${a.data_fim ? MESES[+a.data_fim.slice(5, 7) - 1] : 'prazo'}</span></div>
+        <div class="grow"><div class="t">${esc(a.nome)}</div><div class="s">${a.data_fim ? 'Prazo de entrega ' + fdate(a.data_fim) : 'Sem prazo'}${execDe(a)?.conclusao ? ' · concluída em ' + fdate(execDe(a).conclusao) : ''}</div></div>${execDe(a)?.conclusao ? `<span class="exec-tag">${ic('checkc')}Enviada</span>` : pill(a.situacao)}</a>`).join('')}</div></div>` : ''}
+    ${conferir.length ? `<div class="info warn">${ic('checkc')}<div><b>${conferir.length} atividade(s) com conclusão registrada</b> aguardando você conferir e marcar como realizada: ${conferir.slice(0, 5).map((a) => `<a href="#/atividades/${a.id}">Nº ${pad(a.numero)} ${esc(a.nome)}</a>`).join(', ')}.</div></div>` : ''}`;
   const anos = uniq([...evs.map((e) => (e.data_inicio || '').slice(0, 4)), String(new Date().getFullYear())]).reverse();
 
   const desenhar = () => {
@@ -1049,7 +1084,7 @@ async function viewPainel() {
         <div class="grow"><div class="t">${esc(e.nome)}</div><div class="s">${esc(e.tipo)} · ${esc(e.local || 'Local a definir')}</div></div>${pill(e.situacao)}</a>`;
     };
 
-    view().innerHTML = `
+    view().innerHTML = `${avisos()}
       <div class="kpis">
         <div class="kpi"><div class="ic brand">${ic('calendar')}</div><div><div class="lb">Eventos em ${ano}</div><div class="vl">${doAno.length}</div><div class="ft">${aprov.length} aprovados · ${anal.length} em análise</div></div></div>
         <div class="kpi"><div class="ic green">${ic('checkc')}</div><div><div class="lb">Investimento aprovado</div><div class="vl">${brlCurto(vAprov)}</div><div class="ft">${brl(vAprov)}</div></div></div>
@@ -1089,7 +1124,7 @@ async function viewPainel() {
   };
 
   if (!evs.length) {
-    view().innerHTML = `<div class="card">${vazio('calendar', 'Nenhum evento cadastrado', 'Comece cadastrando o primeiro evento da Dello.', `<a class="btn btn-primary" href="#/eventos/novo">${ic('plus')}Cadastrar evento</a>`)}</div>`;
+    view().innerHTML = avisos() + `<div class="card">${vazio('calendar', 'Nenhum evento cadastrado', 'Comece cadastrando o primeiro evento da Dello.', `<a class="btn btn-primary" href="#/eventos/novo">${ic('plus')}Cadastrar evento</a>`)}</div>`;
     return;
   }
   desenhar();
@@ -1099,15 +1134,62 @@ async function viewPainel() {
    Lista de eventos
    ================================================================ */
 // Bolinha "realizado" no fim da linha da lista de eventos
-const bolinha = (e) => {
-  const pode = podeEditar(e), r = !!e.realizado;
-  const tit = r ? (pode ? 'Realizado · clique para desmarcar' : 'Realizado') : (pode ? 'Clique quando o evento for realizado' : 'Ainda não realizado');
+const bolinha = (e, kind = 'evento') => {
+  const pode = podeEditar(e), r = !!e.realizado, A = kind === 'atividade';
+  const tit = r ? (pode ? `Realizad${A ? 'a' : 'o'} · clique para desmarcar` : `Realizad${A ? 'a' : 'o'}`) : (pode ? `Clique quando ${A ? 'a atividade' : 'o evento'} for realizad${A ? 'a' : 'o'}` : `Ainda não realizad${A ? 'a' : 'o'}`);
   return `<button type="button" class="done-dot ${r ? 'on' : ''} ${pode ? '' : 'ro'}" data-done="${e.id}" role="switch" aria-checked="${r}" title="${tit}" aria-label="${tit}">${ic('check')}</button>`;
 };
 
+// Repetir todos os anos: ao marcar como realizado, cria o cadastro do ano seguinte (datas + 1 ano)
+const maisUmAno = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  if (!m) return iso;
+  return `${+m[1] + 1}-${m[2]}-${m[2] === '02' && m[3] === '29' ? '28' : m[3]}`;
+};
+const avancaDatas = (x) => typeof x === 'string' ? (/^\d{4}-\d{2}-\d{2}$/.test(x) ? maisUmAno(x) : x)
+  : Array.isArray(x) ? x.map(avancaDatas) : (x && typeof x === 'object') ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, avancaDatas(v)])) : x;
+async function criarProximoAno(reg, kind) {
+  const A = kind === 'atividade';
+  const dados = avancaDatas(clone(reg.dados || {}));
+  delete dados.execucao; delete dados.proximo_id;
+  dados.origem_id = reg.id; dados.repetir = true;
+  const novo = { ...clone(reg), id: null, numero: null, situacao: 'analise', realizado: false, dados,
+    nome: String(reg.nome || '').replace(/\b(19|20)\d{2}\b/g, (y) => String(+y + 1)),
+    data_inicio: maisUmAno(reg.data_inicio) || null, data_fim: maisUmAno(reg.data_fim) || null };
+  const salvo = await (A ? api.saveAtividade(novo) : api.saveEvento(novo));
+  reg.dados = { ...(reg.dados || {}), proximo_id: salvo.id };
+  await (A ? api.saveAtividade(reg) : api.saveEvento(reg));
+  return salvo;
+}
+function ligarBolinhas(box, regs, kind, redesenhar, recarregar) {
+  const A = kind === 'atividade';
+  $$('[data-done]', box).forEach((b) => b.addEventListener('click', async () => {
+    const e = regs.find((x) => x.id === b.dataset.done);
+    if (!podeEditar(e)) { toast(`Só quem criou (${nomeDe(e.criado_por)}) ou um administrador pode marcar ${A ? 'esta atividade' : 'este evento'}.`, 'err'); return; }
+    if (b.classList.contains('busy')) return;
+    const novo = !e.realizado;
+    b.classList.add('busy');
+    b.classList.toggle('on', novo);
+    try {
+      const r = await api.marcarRealizado(e.id, novo, kind);
+      e.realizado = !!r.realizado;
+      toast(e.realizado ? `Nº ${pad(e.numero)} marcad${A ? 'a' : 'o'} como realizad${A ? 'a' : 'o'}` : `Nº ${pad(e.numero)} voltou para não realizad${A ? 'a' : 'o'}`);
+      if (e.realizado && e.dados?.repetir && !e.dados?.proximo_id) {
+        try {
+          const prox = await criarProximoAno(e, kind);
+          toast(`Repete todo ano: criado o cadastro Nº ${pad(prox.numero)}${prox.data_inicio ? ' para ' + fdate(prox.data_inicio) : ''}`);
+          recarregar(); return;
+        } catch (x) { toast('Não foi possível criar o cadastro do ano seguinte: ' + msgErro(x), 'err'); }
+      }
+    } catch (x) { toast(msgErro(x), 'err'); }
+    b.classList.remove('busy');
+    redesenhar();
+  }));
+}
+
 async function viewEventos() {
   setPage('Eventos', 'Todos os eventos cadastrados. Você edita os que criou' + (isAdmin() ? ' e, como administrador, qualquer um.' : '.'),
-    `<a class="btn btn-primary" href="#/eventos/novo">${ic('plus')}<span>Novo <span class="lbl-long">evento</span></span></a>`);
+    isExecutor() ? '' : `<a class="btn btn-primary" href="#/eventos/novo">${ic('plus')}<span>Novo <span class="lbl-long">evento</span></span></a>`);
   carregando();
   const evs = S.eventos = await api.listEventos();
   const F = S.filtros;
@@ -1136,14 +1218,13 @@ async function viewEventos() {
     if (!evs.length) { $('#lista').innerHTML = vazio('calendar', 'Nenhum evento cadastrado', 'Cadastre o primeiro evento para começar.', `<a class="btn btn-primary" href="#/eventos/novo">${ic('plus')}Novo evento</a>`); return; }
     if (!lista.length) { $('#lista').innerHTML = vazio('search', 'Nada encontrado', 'Nenhum evento corresponde aos filtros escolhidos.'); return; }
     $('#lista').innerHTML = `<div class="tbl-wrap"><table class="tbl cards">
-      <thead><tr><th>Nº</th><th>Evento</th><th class="hide-md">Tipo</th><th>Período</th><th class="hide-md">Gerente</th><th>Situação</th><th class="right">Investimento</th><th></th><th class="c-done-h" title="Realizado: clique na bolinha quando o evento acontecer" aria-label="Realizado">${ic('checkc')}</th></tr></thead>
+      <thead><tr><th>Nº</th><th>Evento</th><th class="hide-md">Tipo</th><th>Período</th><th class="hide-md">Gerente</th><th class="right">Investimento</th><th></th><th class="c-done-h" title="Realizado: clique na bolinha quando o evento acontecer" aria-label="Realizado">${ic('checkc')}</th></tr></thead>
       <tbody>${lista.map((e) => `<tr class="click" data-id="${e.id}">
-        <td data-hide><span class="seq">${pad(e.numero)}</span></td>
-        <td class="c-main"><div class="ev-name">${esc(e.nome)}${e.visibilidade === 'privado' ? ` <span class="tag priv" title="Privado: só quem criou e os administradores veem">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(e)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="ev-sub">${ic('pin')}${esc(e.local || 'Local a definir')}</div></td>
+        <td data-hide class="c-num">${sitDot(e.situacao)}<span class="seq">${pad(e.numero)}</span></td>
+        <td class="c-main"><div class="ev-name">${esc(e.nome)}${repIco(e)}${e.visibilidade === 'privado' ? ` <span class="tag priv" title="Privado: só quem criou e os administradores veem">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(e)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="ev-sub">${ic('pin')}${esc(e.local || 'Local a definir')}</div></td>
         <td data-hide class="hide-md"><span class="tag">${esc(e.tipo)}</span></td>
         <td data-hide class="c-per">${periodo(e)}</td>
         <td data-hide class="hide-md">${esc(e.gerente || "—")}</td>
-        <td class="c-sit">${pill(e.situacao)}</td>
         <td class="c-val right num nowrap"><b>${brl(e.valor_total)}</b></td>
         <td data-hide><div class="acts">
           ${podeEditar(e) ? `<a class="btn btn-ghost icon-btn" href="#/eventos/${e.id}/editar" title="Editar" aria-label="Editar">${ic('pencil')}</a>
@@ -1151,28 +1232,13 @@ async function viewEventos() {
             : `<span class="btn btn-ghost icon-btn" title="Somente leitura: criado por ${esc(nomeDe(e.criado_por))}" style="cursor:default;color:var(--mute)">${ic('lock')}</span>`}
         </div></td>
         <td class="c-done">${bolinha(e)}</td>
-        <td class="c-meta m-only">Nº ${pad(e.numero)} · ${esc(e.tipo)} · ${periodo(e)}</td>
+        <td class="c-meta m-only">${sitDot(e.situacao)}${SIT[e.situacao]?.label || ''} · Nº ${pad(e.numero)} · ${esc(e.tipo)} · ${periodo(e)}</td>
       </tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="2" data-hide>${lista.length} evento(s)${lista.some((e) => e.realizado) ? ` · ${lista.filter((e) => e.realizado).length} realizado(s)` : ''}</td><td data-hide class="hide-md"></td><td data-hide></td><td data-hide class="hide-md"></td><td data-hide></td><td class="right num nowrap" data-hide>${brl(soma(lista, (e) => e.valor_total))}</td><td data-hide></td><td data-hide></td></tr></tfoot>
+      <tfoot><tr><td colspan="2" data-hide>${lista.length} evento(s)${lista.some((e) => e.realizado) ? ` · ${lista.filter((e) => e.realizado).length} realizado(s)` : ''}</td><td data-hide class="hide-md"></td><td data-hide></td><td data-hide class="hide-md"></td><td class="right num nowrap" data-hide>${brl(soma(lista, (e) => e.valor_total))}</td><td data-hide></td><td data-hide></td></tr></tfoot>
     </table></div>`;
     $$('#lista tr.click').forEach((tr) => tr.addEventListener('click', (ev) => { if (!ev.target.closest('a,button')) location.hash = '#/eventos/' + tr.dataset.id; }));
     $$('#lista [data-del]').forEach((b) => b.addEventListener('click', () => excluirEvento(evs.find((e) => e.id === b.dataset.del), () => viewEventos())));
-    $$('#lista [data-done]').forEach((b) => b.addEventListener('click', async () => {
-      const e = evs.find((x) => x.id === b.dataset.done);
-      if (!podeEditar(e)) { toast(`Só quem criou (${nomeDe(e.criado_por)}) ou um administrador pode marcar este evento.`, 'err'); return; }
-      if (b.classList.contains('busy')) return;
-      const novo = !e.realizado;
-      b.classList.add('busy');
-      b.classList.toggle('on', novo);
-      try {
-        const r = await api.marcarRealizado(e.id, novo);
-        e.realizado = !!r.realizado;
-        toast(e.realizado ? `Nº ${pad(e.numero)} marcado como realizado` : `Nº ${pad(e.numero)} voltou para não realizado`);
-      } catch (x) { toast(msgErro(x), 'err'); }
-      b.classList.remove('busy');
-      b.outerHTML = bolinha(e);
-      desenhar();
-    }));
+    ligarBolinhas($('#lista'), evs, 'evento', desenhar, () => viewEventos());
   };
 
   let t;
@@ -1203,7 +1269,7 @@ function linhasEvento(e) {
   const ce = d.contratoEvento || {}, mo = d.montadora || {};
   if (ce.valor || ce.data || ce.area) L.push(['Contrato do evento', [ce.data && 'Aprovação ' + fdate(ce.data), ce.area && ce.area + ' m²'].filter(Boolean).join(' · '), ce.valor]);
   if (mo.valor || mo.nome) L.push(['Montadora', [mo.nome, mo.data && fdate(mo.data)].filter(Boolean).join(' · '), mo.valor]);
-  (d.servicos || []).filter((s) => s.qt || s.valor).forEach((s) => L.push(['Serviço', itemDesc(s), s.valor]));
+  (d.servicos || []).filter((s) => s.qt || s.valor || s.obs).forEach((s) => L.push(['Serviço', `${itemDesc(s)}${s.obs ? ' · ' + s.obs : ''}`, s.valor]));
   (d.gastos || []).filter((g) => g.qt || g.valor || g.obs).forEach((g) => L.push(['Gasto diverso', `${itemDesc(g)}${g.obs ? ' · ' + g.obs : ''}`, g.valor]));
   (d.hospedagem || []).forEach((h) => L.push(['Hospedagem', [h.nome, h.hotel, (h.chegada || h.saida) && `${fdate(h.chegada)} a ${fdate(h.saida)}`, h.codigo && 'Reserva ' + h.codigo].filter(Boolean).join(' · '), h.valor]));
   (d.alimentacao || []).forEach((a) => L.push(['Alimentação', [fdate(a.data), a.local, a.obs].filter(Boolean).join(' · '), a.valor]));
@@ -1253,7 +1319,7 @@ function fichaHtml(e) {
     <div class="f-cols">
       ${bloco('Endereço de entrega', entrega, st.frete ? brl(st.frete) : '')}
       ${bloco('Contratos', contratos, st.contratos ? brl(st.contratos) : '')}
-      ${bloco('Serviços contratados', itens(d.servicos), st.servicos ? brl(st.servicos) : '')}
+      ${bloco('Serviços contratados', itens(d.servicos, true), st.servicos ? brl(st.servicos) : '')}
       ${bloco('Gastos diversos', itens(d.gastos, true), st.gastos ? brl(st.gastos) : '')}
       ${bloco('Envolvidos', (d.envolvidos || []).length ? `<p>${d.envolvidos.map(esc).join(', ')}</p>` : '')}
       ${bloco('Hospedagem', hosp, st.hospedagem ? brl(st.hospedagem) : '')}
@@ -1294,7 +1360,7 @@ async function viewDetalhe(id) {
     <div class="print-only" style="margin-bottom:16px"><img src="assets/logo-dello.png" alt="Dello" style="width:90px"></div>
     <div class="card">
       <div class="det-head">
-        <div class="grow">${pill(e.situacao)} <span class="tag brand">${esc(e.tipo)}</span>${e.realizado ? ` <span class="tag feito">${ic('check')}Realizado</span>` : ''}${e.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado · só quem criou e administradores veem</span>` : ''}
+        <div class="grow">${pill(e.situacao)} <span class="tag brand">${esc(e.tipo)}</span>${e.realizado ? ` <span class="tag feito">${ic('check')}Realizado</span>` : ''}${e.dados?.repetir ? ` <span class="tag rep">${ic('repeat')}Repete todo ano</span>` : ''}${e.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado · só quem criou e administradores veem</span>` : ''}
           <h2>${esc(e.nome)}</h2>
           ${clienteTexto(d.cliente) ? `<div style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink-2);margin-bottom:2px">${ic('user')}Cliente: ${esc(clienteTexto(d.cliente))}</div>` : ''}
           <div class="muted" style="display:flex;align-items:center;gap:6px">${ic('pin')}${esc(e.local || 'Local a definir')}</div>
@@ -1328,7 +1394,7 @@ async function viewDetalhe(id) {
         <div class="grid g3"><div><div class="lbl">Data</div>${fdate(mo.data) || '—'}</div><div><div class="lbl">Montadora</div>${esc(mo.nome || '—')}</div><div><div class="lbl">Valor</div>${brl(mo.valor)}</div></div>
       </div>
       <div class="card"><div class="card-h"><h3>Serviços contratados</h3></div>
-        ${tabela([['Item'], ['Qtde', 'r'], ['Unitário', 'r'], ['Total', 'r']], (d.servicos || []).filter((s) => s.qt || s.valor).map((s) => [esc(s.nome), esc(s.qt || 1), brl(unitDe(s)), brl(s.valor)]), st.servicos)}</div>
+        ${tabela([['Item'], ['Qtde', 'r'], ['Unitário', 'r'], ['Obs.'], ['Total', 'r']], (d.servicos || []).filter((s) => s.qt || s.valor || s.obs).map((s) => [esc(s.nome), esc(s.qt || 1), brl(unitDe(s)), esc(s.obs || ''), brl(s.valor)]), st.servicos)}</div>
       <div class="card"><div class="card-h"><h3>Gastos diversos</h3></div>
         ${tabela([['Item'], ['Qtde', 'r'], ['Unitário', 'r'], ['Obs.'], ['Total', 'r']], (d.gastos || []).filter((g) => g.qt || g.valor || g.obs).map((g) => [esc(g.nome), esc(g.qt || 1), brl(unitDe(g)), esc(g.obs || ''), brl(g.valor)]), st.gastos)}</div>
       <div class="card full"><div class="card-h"><h3>Envolvidos</h3></div>
@@ -1577,7 +1643,7 @@ function repHtml(tipo, obj = {}, n = 1) {
     <div class="rep-grid">${cfg.campos.map((c) => campoRep(c, obj[c.k])).join('')}</div></div>`;
 }
 function itemHtml(grupo, it) {
-  const obs = grupo === 'gastos';
+  const obs = grupo === 'gastos' || grupo === 'servicos';
   const u = unitDe(it);
   const cheio = it.qt || u;
   return `<tr data-item ${it.fixo ? `data-fixo="1" data-nome="${esc(it.nome)}"` : ''} class="${cheio ? 'has' : ''}">
@@ -1593,6 +1659,7 @@ const comprasHtml = (compras) => `${compras.map((c, i) => `<div class="field"><l
 
 async function viewForm(id, duplicar = false, kind = 'evento') {
   const A = kind === 'atividade';
+  if (isExecutor()) { toast('Seu acesso é de executor: você vê tudo e registra a conclusão das suas atividades, mas não cadastra nem altera.', 'err'); location.hash = A ? '#/atividades' : '#/eventos'; return; }
   const K = A ? { rota: 'atividades', sing: 'atividade', Sing: 'Atividade', o: 'a', este: 'esta atividade', nova: 'Nova atividade' }
     : { rota: 'eventos', sing: 'evento', Sing: 'Evento', o: 'o', este: 'este evento', nova: 'Novo evento' };
   carregando();
@@ -1636,6 +1703,8 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
           <label class="vis ${ev.visibilidade !== 'privado' ? 'on' : ''}"><input type="radio" name="vis" value="todos" ${ev.visibilidade !== 'privado' ? 'checked' : ''}>${ic('users')}<span><b>Para todos</b><small>Todos os usuários aprovados veem</small></span></label>
           <label class="vis ${ev.visibilidade === 'privado' ? 'on' : ''}"><input type="radio" name="vis" value="privado" ${ev.visibilidade === 'privado' ? 'checked' : ''}>${ic('lock')}<span><b>Privado</b><small>Só você e os administradores veem</small></span></label>
         </div>` : ''}
+        <div class="rep-anual"><label class="toggle"><input type="checkbox" id="f-repetir" ${ev.dados?.repetir ? 'checked' : ''}><span class="sw"></span>${ic('repeat')}<b>Repetir todos os anos</b></label>
+          <span class="hint">Quando ${K.o} ${K.sing} for marcad${K.o} como realizad${K.o} (bolinha da lista), o sistema cria sozinho o cadastro do ano seguinte, com as datas um ano à frente.</span></div>
         <div class="grid g3">
           <div class="field span2"><label for="f-nome">Nome d${K.o} ${K.sing} <span class="req">*</span></label><input id="f-nome" value="${esc(ev.nome)}" placeholder="${A ? 'Ex.: Anúncio revista Volta às Aulas' : 'Ex.: Feira Escolar 2027'}" maxlength="160"></div>
           <div class="field"><label for="f-tipo">Tipo de ${K.sing}</label>
@@ -1715,7 +1784,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
 
       <section class="card">
         ${secH(4, 'Serviços contratados', 'Mobiliário e equipamentos do estande — o total é quantidade × valor unitário', 'servicos')}
-        ${A ? '' : tabItens('servicos', false)}
+        ${A ? '' : tabItens('servicos', true)}
         <button type="button" class="btn add-row btn-sm" data-add-item="servicos">${ic('plus')}Outro serviço</button>
       </section>
 
@@ -1789,6 +1858,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   <datalist id="dl-tipos">${tiposDe(mesmos, base).filter((t) => !base.includes(t)).map((t) => `<option value="${esc(t)}">`).join('')}</datalist>
   <datalist id="dl-cli-cod">${clientesAnt.map((c) => `<option value="${esc(c.codigo)}">${esc(c.nome)}</option>`).join('')}</datalist>
   <datalist id="dl-cli-nome">${uniq(clientesAnt.map((c) => c.nome)).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+  <datalist id="dl-resp">${uniq(S.perfis.filter((p) => p.ativo).map((p) => p.nome)).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
   <datalist id="dl-pag">${PAGAMENTOS.map((x) => `<option value="${esc(x)}">`).join('')}</datalist>
   <datalist id="dl-loc">${sugLocais.map((g) => `<option value="${esc(g)}">`).join('')}</datalist>
   </form>`;
@@ -1817,17 +1887,19 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       tipo: v('tipo') === OUTRO_TIPO ? v('tipo-outro') : v('tipo'), nome: v('nome'), gerente: v('gerente'),
       data_inicio: v('inicio'), data_fim: v('fim'),
     };
+    const extra = { repetir: !!$('#f-repetir')?.checked || undefined,
+      proximo_id: duplicar ? undefined : ev.dados?.proximo_id, origem_id: duplicar ? undefined : ev.dados?.origem_id };
     const cliente = { codigo: v('cli-cod'), nome: v('cli-nome') };
     const compras = [0, 1, 2].map((i) => ({ ano: Number($('#f-cp-' + i).dataset.ano), valor: parseMoney($('#f-cp-' + i).value) }));
     if (A) {
-      return { ...comum, dados: {
+      return { ...comum, dados: { ...extra,
         cliente, compras, contrato: { data: v('ct-data'), tipo: v('ct-tipo'), pagamento: v('ct-pag'), valor: parseMoney(v('ct-valor')) },
         servicos: linhas('servicosAtv').map((x) => ({ ...x, email: (x.email || '').toLowerCase() })), observacoes: $('#f-obs').value.trim(),
       } };
     }
     const area = v('ce-area');
     const modo = $('input[name=envio]:checked', frm)?.value || '';
-    return { ...comum, local: v('local'), dados: {
+    return { ...comum, local: v('local'), dados: { ...extra,
       contratoEvento: { data: v('ce-data'), area: area ? parseMoney(area) : '', valor: parseMoney(v('ce-valor')) },
       montadora: { data: v('mo-data'), nome: v('mo-nome'), valor: parseMoney(v('mo-valor')) },
       cliente, compras, hora_inicio: v('hini'), hora_fim: v('hfim'),
@@ -2035,7 +2107,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       if (dd.entrega.email && !emailOk(dd.entrega.email)) return erro('en-email', 'E-mail do cliente inválido.');
       if (dd.hospedagem.some((h) => h.chegada && h.saida && h.saida < h.chegada)) { toast('Há hospedagem com saída antes da chegada.', 'err'); return; }
       const temAlgo = (o) => Object.entries(o).some(([k, val]) => k !== 'meio' && val !== '' && val !== 0 && val != null);
-      dd.servicos = dd.servicos.filter((x) => x.qt || x.unit || (!x.fixo && x.nome)).map((x) => ({ ...x, nome: x.nome || 'Outro serviço' }));
+      dd.servicos = dd.servicos.filter((x) => x.qt || x.unit || x.obs || (!x.fixo && x.nome)).map((x) => ({ ...x, nome: x.nome || 'Outro serviço' }));
       dd.gastos = dd.gastos.filter((x) => x.qt || x.unit || x.obs || (!x.fixo && x.nome)).map((x) => ({ ...x, nome: x.nome || 'Outro gasto' }));
       dd.envolvidos = dd.envolvidos.filter(Boolean);
       dd.hospedagem = dd.hospedagem.filter(temAlgo);
@@ -2073,7 +2145,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
    ================================================================ */
 async function viewAtividades() {
   setPage('Atividades', 'Anúncios, folders, catálogos, vídeos e outras ações. Você edita as que criou' + (isAdmin() ? ' e, como administrador, qualquer uma.' : '.'),
-    `<a class="btn btn-primary" href="#/atividades/nova">${ic('plus')}<span>Nova <span class="lbl-long">atividade</span></span></a>`);
+    isExecutor() ? '' : `<a class="btn btn-primary" href="#/atividades/nova">${ic('plus')}<span>Nova <span class="lbl-long">atividade</span></span></a>`);
   carregando();
   const lst = S.atividades = await api.listAtividades();
   const F = S.filtrosAtv;
@@ -2089,7 +2161,7 @@ async function viewAtividades() {
   const servTxt = (a) => uniq((a.dados?.servicos || []).map((x) => x.tipo)).join(', ');
   const desenhar = () => {
     const q = F.q.trim().toLowerCase();
-    const baseL = lst.filter((a) => (!F.tipo || a.tipo === F.tipo) && (!F.meus || a.criado_por === S.me.id)
+    const baseL = lst.filter((a) => (!F.tipo || a.tipo === F.tipo) && (!F.meus || a.criado_por === S.me.id || souResponsavel(a))
       && (!q || [a.nome, a.gerente, pad(a.numero), String(a.numero), a.tipo, clienteDe(a).codigo, clienteDe(a).nome, ...(a.dados?.servicos || []).map((x) => x.responsavel)]
         .some((x) => String(x || '').toLowerCase().includes(q))));
     const lista = baseL.filter((a) => !F.sit || a.situacao === F.sit);
@@ -2098,27 +2170,29 @@ async function viewAtividades() {
     $$('#asit .chip').forEach((b) => b.onclick = () => { F.sit = b.dataset.s; desenhar(); });
     if (!lst.length) { $('#alista').innerHTML = vazio('megaphone', 'Nenhuma atividade cadastrada', 'Cadastre a primeira atividade: um anúncio, folder, catálogo, vídeo…', `<a class="btn btn-primary" href="#/atividades/nova">${ic('plus')}Nova atividade</a>`); return; }
     if (!lista.length) { $('#alista').innerHTML = vazio('search', 'Nada encontrado', 'Nenhuma atividade corresponde aos filtros escolhidos.'); return; }
+    const execTag = (a) => { const x = execDe(a); if (!x?.conclusao) return ''; return `<div class="exec-tag ${a.realizado ? 'ok' : ''}" title="${a.realizado ? 'Concluída e confirmada' : 'O responsável registrou a conclusão. Confira e clique na bolinha de realizada.'}">${ic('checkc')}Concluída ${fdate(x.conclusao)}${a.realizado ? '' : ' · confirmar'}</div>`; };
     $('#alista').innerHTML = `<div class="tbl-wrap"><table class="tbl cards">
-      <thead><tr><th>Nº</th><th>Atividade</th><th class="hide-md">Tipo</th><th>Início · Prazo</th><th class="hide-md">Gerente</th><th>Situação</th><th class="right">Valor</th><th></th></tr></thead>
-      <tbody>${lista.map((a) => `<tr class="click" data-id="${a.id}">
-        <td data-hide><span class="seq">${pad(a.numero)}</span></td>
-        <td class="c-main"><div class="ev-name">${esc(a.nome)}${a.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(a)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(a)))}</div>` : ''}${servTxt(a) ? `<div class="ev-sub">${ic('megaphone')}${esc(servTxt(a))}</div>` : ''}</td>
+      <thead><tr><th>Nº</th><th>Atividade</th><th class="hide-md">Tipo</th><th>Início · Prazo</th><th>Responsável pela execução</th><th class="right">Valor</th><th></th><th class="c-done-h" title="Realizada: clique na bolinha quando a atividade for concluída" aria-label="Realizada">${ic('checkc')}</th></tr></thead>
+      <tbody>${lista.map((a) => `<tr class="click ${souResponsavel(a) && !a.realizado ? 'minha' : ''}" data-id="${a.id}">
+        <td data-hide class="c-num">${sitDot(a.situacao)}<span class="seq">${pad(a.numero)}</span></td>
+        <td class="c-main"><div class="ev-name">${esc(a.nome)}${repIco(a)}${a.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(a)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(a)))}</div>` : ''}${servTxt(a) ? `<div class="ev-sub">${ic('megaphone')}${esc(servTxt(a))}</div>` : ''}<div class="m-only">${execTag(a)}</div></td>
         <td data-hide class="hide-md"><span class="tag">${esc(a.tipo)}</span></td>
         <td data-hide class="nowrap">${fdate(a.data_inicio) || '—'}${a.data_fim ? `<div class="small muted">Prazo: ${fdate(a.data_fim)}</div>` : ''}</td>
-        <td data-hide class="hide-md">${esc(a.gerente || '—')}</td>
-        <td class="c-sit">${pill(a.situacao)}</td>
+        <td data-hide class="c-resp">${responsaveisDe(a).length ? esc(responsaveisDe(a).join(', ')) : '<span class="muted">—</span>'}${execTag(a)}</td>
         <td class="c-val right num nowrap"><b>${brl(a.valor_total)}</b></td>
         <td data-hide><div class="acts">
           ${podeEditar(a) ? `<a class="btn btn-ghost icon-btn" href="#/atividades/${a.id}/editar" title="Editar" aria-label="Editar">${ic('pencil')}</a>
             <button class="btn btn-ghost icon-btn btn-danger" data-del="${a.id}" title="Excluir" aria-label="Excluir">${ic('trash')}</button>`
             : `<span class="btn btn-ghost icon-btn" title="Somente leitura: criada por ${esc(nomeDe(a.criado_por))}" style="cursor:default;color:var(--mute)">${ic('lock')}</span>`}
         </div></td>
-        <td class="c-meta m-only">Nº ${pad(a.numero)} · ${esc(a.tipo)} · ${datasAtv(a)}</td>
+        <td class="c-done">${bolinha(a, 'atividade')}</td>
+        <td class="c-meta m-only">${sitDot(a.situacao)}${SIT[a.situacao]?.label || ''} · Nº ${pad(a.numero)} · ${esc(a.tipo)} · ${datasAtv(a)}${responsaveisDe(a).length ? ' · Resp.: ' + esc(responsaveisDe(a).join(', ')) : ''}</td>
       </tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="2" data-hide>${lista.length} atividade(s)</td><td data-hide class="hide-md"></td><td data-hide></td><td data-hide class="hide-md"></td><td data-hide></td><td class="right num nowrap" data-hide>${brl(soma(lista, (a) => a.valor_total))}</td><td data-hide></td></tr></tfoot>
+      <tfoot><tr><td colspan="2" data-hide>${lista.length} atividade(s)${lista.some((a) => a.realizado) ? ` · ${lista.filter((a) => a.realizado).length} realizada(s)` : ''}${lista.some((a) => execDe(a)?.conclusao && !a.realizado) ? ` · <b>${lista.filter((a) => execDe(a)?.conclusao && !a.realizado).length} para confirmar</b>` : ''}</td><td data-hide class="hide-md"></td><td data-hide></td><td data-hide></td><td class="right num nowrap" data-hide>${brl(soma(lista, (a) => a.valor_total))}</td><td data-hide></td><td data-hide></td></tr></tfoot>
     </table></div>`;
     $$('#alista tr.click').forEach((tr) => tr.addEventListener('click', (x) => { if (!x.target.closest('a,button')) location.hash = '#/atividades/' + tr.dataset.id; }));
     $$('#alista [data-del]').forEach((b) => b.addEventListener('click', () => excluirEvento(lst.find((a) => a.id === b.dataset.del), () => viewAtividades(), 'atividade')));
+    ligarBolinhas($('#alista'), lst, 'atividade', desenhar, () => viewAtividades());
   };
   let t;
   $('#aq').addEventListener('input', (x) => { clearTimeout(t); t = setTimeout(() => { F.q = x.target.value; desenhar(); }, 150); });
@@ -2172,7 +2246,7 @@ async function viewDetalheAtv(id) {
     view().innerHTML = `<div class="card">${vazio('alert', 'Atividade não encontrada', 'Ela pode ter sido excluída.', `<a class="btn" href="#/atividades">${ic('back')}Voltar para atividades</a>`)}</div>`;
     return;
   }
-  const d = a.dados || {}, ct = d.contrato || {}, pode = podeEditar(a);
+  const d = a.dados || {}, ct = d.contrato || {}, pode = podeEditar(a), podeExec = podeExecutar(a), ex = execDe(a);
   setPage(`Atividade Nº ${pad(a.numero)}`, `<a href="#/atividades" style="text-decoration:none;font-weight:600">← Atividades</a>`,
     `<button class="btn" id="dPrint" title="Imprimir">${ic('printer')}<span class="lbl-long">Imprimir</span></button>
      <button class="btn" id="dImg" title="Enviar a ficha como imagem (WhatsApp, e-mail…)">${ic('image')}<span class="lbl-long">Imagem</span></button>
@@ -2182,10 +2256,11 @@ async function viewDetalheAtv(id) {
      ${pode ? `<button class="btn btn-danger" id="dDel" title="Excluir">${ic('trash')}</button><a class="btn btn-primary" href="#/atividades/${a.id}/editar">${ic('pencil')}Editar</a>` : ''}`);
   const pct = compraTexto(a.valor_total, d.compras);
   view().innerHTML = fichaAtividade(a) + `<div class="no-print">
-    ${pode ? '' : `<div class="info">${ic('lock')}<div>Somente leitura. Esta atividade foi criada por <b>${esc(nomeDe(a.criado_por))}</b>; só essa pessoa ou um administrador pode alterá-la.</div></div>`}
+    ${pode ? '' : podeExec ? `<div class="info">${ic('info')}<div>Você é <b>responsável pela execução</b> desta atividade. Quando terminar, registre abaixo a <b>data de conclusão</b>, uma observação e as fotos do que foi feito.</div></div>`
+      : `<div class="info">${ic('lock')}<div>Somente leitura. Esta atividade foi criada por <b>${esc(nomeDe(a.criado_por))}</b>; só essa pessoa ou um administrador pode alterá-la.</div></div>`}
     <div class="card">
       <div class="det-head">
-        <div class="grow">${pill(a.situacao)} <span class="tag brand">${esc(a.tipo)}</span>${a.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado · só quem criou e administradores veem</span>` : ''}
+        <div class="grow">${pill(a.situacao)} <span class="tag brand">${esc(a.tipo)}</span>${a.realizado ? ` <span class="tag feito">${ic('check')}Realizada</span>` : ''}${d.repetir ? ` <span class="tag rep">${ic('repeat')}Repete todo ano</span>` : ''}${a.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado · só quem criou e administradores veem</span>` : ''}
           <h2>${esc(a.nome)}</h2>
           ${clienteTexto(d.cliente) ? `<div style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink-2)">${ic('user')}Cliente: ${esc(clienteTexto(d.cliente))}</div>` : ''}
           ${pct ? `<div class="pct-info" style="margin-top:6px">${ic('trend')}<span>Representa <b>${esc(pct)}</b></span></div>` : ''}</div>
@@ -2208,10 +2283,20 @@ async function viewDetalheAtv(id) {
         ${(d.servicos || []).length ? `<div style="overflow-x:auto"><table class="mini"><thead><tr><th>Tipo</th><th>Formato / descrição</th><th>Responsável</th><th>E-mail para envio</th></tr></thead><tbody>
           ${d.servicos.map((x) => `<tr><td><b>${esc(x.tipo || '—')}</b></td><td>${esc(x.formato || '—')}</td><td>${esc(x.responsavel || '—')}</td><td>${x.email ? `<a href="mailto:${encodeURIComponent(x.email)}">${esc(x.email)}</a>` : '—'}</td></tr>`).join('')}</tbody></table></div>`
           : '<p class="muted small" style="margin:0">Nenhum serviço informado.</p>'}</div>
+      <div class="card full exec-card ${ex?.conclusao ? 'feita' : ''}"><div class="card-h"><h3>${ic('checkc')}Execução</h3><span class="sp"></span>
+        ${ex?.conclusao ? `<span class="exec-tag ${a.realizado ? 'ok' : ''}">${ic('checkc')}Concluída em ${fdate(ex.conclusao)}${a.realizado ? ' · confirmada' : ' · aguardando confirmação'}</span>` : '<span class="small muted">Ainda não concluída</span>'}</div>
+        <div class="small muted" style="margin:-6px 0 12px">Responsável: <b>${esc(responsaveisDe(a).join(', ') || 'não informado')}</b>${ex?.por ? ` · registrado por ${esc(ex.por)} em ${fdt(ex.em)}` : ''}</div>
+        ${podeExec ? `<div class="grid g4">
+          <div class="field"><label for="x-conc">Data de conclusão</label><input id="x-conc" type="date" value="${esc(ex?.conclusao || '')}"></div>
+          <div class="field span3"><label for="x-obs">Observação da execução</label><textarea id="x-obs" rows="2" maxlength="2000" placeholder="O que foi feito, onde foi entregue, link do arquivo…">${esc(ex?.obs || '')}</textarea></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px"><button class="btn btn-primary" id="xSalvar">${ic('save')}Salvar execução</button>
+          <span class="small muted">As fotos do que foi feito vão em <b>Fotos e arquivos</b>, logo abaixo.</span></div>`
+        : (ex?.obs ? `<div style="white-space:pre-wrap">${esc(ex.obs)}</div>` : '')}</div>
       ${d.observacoes ? `<div class="card full"><div class="card-h"><h3>Observações</h3></div><div style="white-space:pre-wrap">${esc(d.observacoes)}</div></div>` : ''}
       <div class="card full" id="anxCard"><div class="card-h"><h3>Fotos e arquivos <span class="muted small" id="anxCount"></span></h3><span class="sp"></span>
         <span class="small muted hidden" id="anxStatus"></span>
-        ${pode ? `<label class="btn btn-sm btn-primary" for="anxInput">${ic('upload')}Adicionar</label><input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">` : ''}</div>
+        ${podeExec ? `<label class="btn btn-sm btn-primary" for="anxInput">${ic('upload')}Adicionar</label><input type="file" id="anxInput" multiple accept="image/*,application/pdf" class="hidden">` : ''}</div>
         <div id="anxBox"></div></div>
       <div class="card full"><div class="card-h"><h3>Histórico desta atividade</h3></div><div id="dHist"><div class="spinner"></div></div></div>
     </div></div>`;
@@ -2222,7 +2307,14 @@ async function viewDetalheAtv(id) {
   $('#dPdf').onclick = (x) => enviarFicha('pdf', x.currentTarget, a, 'atividade');
   $('#dDel')?.addEventListener('click', () => excluirEvento(a, () => { location.hash = '#/atividades'; }, 'atividade'));
   carregarAnexos(a, pode);
-  if (pode) {
+  $('#xSalvar')?.addEventListener('click', async (x) => {
+    const b = x.currentTarget, conc = $('#x-conc').value, obs = $('#x-obs').value.trim();
+    if (conc && !/^(19|20)\d\d-/.test(conc)) { toast('Confira o ano da data de conclusão (ex.: 2026).', 'err'); return; }
+    b.disabled = true;
+    try { await api.registrarExecucao(a.id, conc, obs); toast(conc ? 'Conclusão registrada. Quem cadastrou já vê na lista.' : 'Execução salva'); viewDetalheAtv(a.id); }
+    catch (y) { toast(msgErro(y), 'err'); b.disabled = false; }
+  });
+  if (podeExec) {
     $('#anxInput').onchange = (x) => { enviarAnexos(a, x.target.files, pode); x.target.value = ''; };
     const card = $('#anxCard');
     card.addEventListener('dragover', (x) => { x.preventDefault(); card.classList.add('drag'); });
@@ -2248,8 +2340,114 @@ function ordenarRel(lista, ordem) {
   return l.sort((a, b) => (!a.data_inicio) - (!b.data_inicio) || dir * String(a.data_inicio || '').localeCompare(String(b.data_inicio || '')) || b.numero - a.numero);
 }
 
+// Escolha: relatório de eventos ou de atividades
+const relSwitch = () => `<div class="seg seg2 rel-tipo no-print">${[['eventos', 'Relatório de eventos', 'calendar', 'Feiras, convenções, workshops, ações…'], ['atividades', 'Relatório de atividades', 'megaphone', 'Anúncios, folders, catálogos, vídeos…']]
+  .map(([v, l, i, sub]) => `<label class="vis ${(S.relTipo || 'eventos') === v ? 'on' : ''}"><input type="radio" name="relTipo" value="${v}" ${(S.relTipo || 'eventos') === v ? 'checked' : ''}>${ic(i)}<span><b>${l}</b><small>${sub}</small></span></label>`).join('')}</div>`;
+const ligarSwitch = () => $$('input[name=relTipo]').forEach((r) => r.addEventListener('change', () => { S.relTipo = r.value; viewRelatorios(); }));
+
+const COLS_RAT = [['cliente', 'Cliente'], ['tipo', 'Tipo'], ['datas', 'Início · Prazo'], ['gerente', 'Gerente'], ['servicos', 'Serviços'],
+  ['responsavel', 'Responsável'], ['conclusao', 'Conclusão'], ['situacao', 'Situação'], ['realizado', 'Realizada'], ['pct', '% compras']];
+
+async function viewRelAtividades() {
+  carregando();
+  const lst = S.atividades = await api.listAtividades();
+  const R = S.relAtv || (S.relAtv = { sits: [...SIT_ORDEM], de: '', ate: '', resp: '', feito: 'todos', ordem: 'recente', formato: 'resumido', cols: COLS_RAT.map(([k]) => k) });
+  const resps = uniq(lst.flatMap(responsaveisDe));
+
+  view().innerHTML = `${relSwitch()}<div class="card no-print">
+    <div class="rep-filters rep-atv">
+      <div class="field"><label>Responsável pela execução</label><select id="aResp"><option value="">Todos os responsáveis</option>${resps.map((n) => `<option value="${esc(n)}" ${R.resp === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
+      <div class="grid g2"><div class="field"><label>Período: de</label><input type="date" id="aDe" value="${R.de}"></div><div class="field"><label>até</label><input type="date" id="aAte" value="${R.ate}"></div></div>
+      <div class="field"><label>Formato</label><select id="aFmt"><option value="resumido" ${R.formato === 'resumido' ? 'selected' : ''}>Resumido</option><option value="detalhado" ${R.formato === 'detalhado' ? 'selected' : ''}>Detalhado (serviços e execução)</option></select></div>
+      <div class="field"><label>Ordenar por</label><select id="aOrdem">${ORDENS_REL.map(([v, l]) => `<option value="${v}" ${R.ordem === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <button class="btn btn-primary" id="aGerar">${ic('file')}Gerar relatório</button>
+    </div>
+    <div class="rep-sits"><span class="lbl">Situações:</span>
+      ${SIT_ORDEM.map((x) => `<label class="chk-sit"><input type="checkbox" value="${x}" ${R.sits.includes(x) ? 'checked' : ''}><span class="d" style="background:${SIT[x].hex}"></span>${SIT[x].label}</label>`).join('')}
+      <span class="rep-sep"></span><span class="lbl">Realizadas:</span>
+      ${[['todos', 'Todas'], ['sim', 'Só as realizadas'], ['nao', 'Só as não realizadas']].map(([v, l]) => `<label class="chk-sit"><input type="radio" name="aFeito" value="${v}" ${R.feito === v ? 'checked' : ''}>${l}</label>`).join('')}
+    </div>
+    <div class="rep-sits rep-cols"><span class="lbl">Informações no relatório:</span>
+      ${COLS_RAT.map(([k, l]) => `<label class="chk-sit"><input type="checkbox" value="${k}" ${R.cols.includes(k) ? 'checked' : ''}>${l}</label>`).join('')}
+    </div></div>
+    <div id="rOut"></div>`;
+  ligarSwitch();
+  $('#aGerar').onclick = () => gerar();
+  ['aResp', 'aDe', 'aAte'].forEach((id) => $('#' + id).addEventListener('change', () => gerar()));
+  $('#aFmt').onchange = (e) => { R.formato = e.target.value; gerar(); };
+  $('#aOrdem').onchange = (e) => { R.ordem = e.target.value; gerar(); };
+  $$('input[name=aFeito]').forEach((c) => c.addEventListener('change', () => { R.feito = c.value; gerar(); }));
+  $$('.rep-cols input').forEach((c) => c.addEventListener('change', () => { R.cols = $$('.rep-cols input:checked').map((x) => x.value); gerar(); }));
+  $$('.rep-sits:not(.rep-cols) input[type=checkbox]').forEach((c) => c.addEventListener('change', () => {
+    R.sits = $$('.rep-sits:not(.rep-cols) input[type=checkbox]:checked').map((x) => x.value);
+    if (!R.sits.length) { c.checked = true; R.sits = [c.value]; toast('Deixe pelo menos uma situação marcada.', 'err'); }
+    gerar();
+  }));
+
+  function gerar() {
+    R.resp = $('#aResp').value; R.de = $('#aDe').value; R.ate = $('#aAte').value;
+    let lista = lst.filter((a) => R.sits.includes(a.situacao) && (R.feito === 'todos' || !!a.realizado === (R.feito === 'sim'))
+      && (!R.resp || responsaveisDe(a).some((n) => normNome(n) === normNome(R.resp))));
+    if (R.de || R.ate) lista = lista.filter((a) => { const i = a.data_inicio || a.data_fim, f = a.data_fim || a.data_inicio; return i && (!R.de || f >= R.de) && (!R.ate || i <= R.ate); });
+    lista = ordenarRel(lista, R.ordem);
+    const desc = [R.sits.length < SIT_ORDEM.length ? 'Situações: ' + R.sits.map((x) => SIT[x].label).join(', ') : 'Situações: todas',
+      R.resp && 'Responsável: ' + R.resp, (R.de || R.ate) && `Período: ${fdate(R.de) || 'início'} a ${fdate(R.ate) || 'em diante'}`,
+      R.feito === 'sim' ? 'só realizadas' : R.feito === 'nao' ? 'só não realizadas' : ''].filter(Boolean).join(' · ');
+    const C = (k) => R.cols.includes(k);
+    const total = soma(lista, (a) => a.valor_total);
+    const conc = lista.filter((a) => execDe(a)?.conclusao).length;
+    const cols = [
+      ['tipo', 'Tipo', '', (a) => esc(a.tipo)],
+      ['datas', 'Início · Prazo', 'nowrap', (a) => `${fdate(a.data_inicio) || '—'}${a.data_fim ? `<div class="small muted">Prazo ${fdate(a.data_fim)}</div>` : ''}`],
+      ['gerente', 'Gerente', '', (a) => esc(a.gerente)],
+      ['servicos', 'Serviços', '', (a) => esc(uniq((a.dados?.servicos || []).map((x) => x.tipo)).join(', ') || '—')],
+      ['responsavel', 'Responsável', '', (a) => esc(responsaveisDe(a).join(', ') || '—')],
+      ['conclusao', 'Conclusão', 'nowrap', (a) => execDe(a)?.conclusao ? fdate(execDe(a).conclusao) : '<span class="muted">—</span>'],
+      ['situacao', 'Situação', '', (a) => pill(a.situacao)],
+      ['realizado', 'Realizada', 'c', (a) => a.realizado ? `<span class="tag feito">${ic('check')}Sim</span>` : '<span class="muted">Não</span>'],
+      ['pct', '% compras', 'r nowrap', (a) => { const x = analiseCompra(a.valor_total, a.dados?.compras); return x ? `${pctFmt(x.pctUlt)}<div class="small muted">de ${x.ultAno}</div>` : '—'; }],
+    ].filter(([k]) => C(k));
+    const tabela = `<div style="overflow-x:auto"><table class="mini"><thead><tr><th>Nº</th><th>Atividade</th>${cols.map(([, t, c]) => `<th class="${c}">${t}</th>`).join('')}<th class="r">Valor</th></tr></thead>
+      <tbody>${lista.map((a) => `<tr><td class="seq">${pad(a.numero)}</td><td><b>${esc(a.nome)}</b>${C('cliente') && clienteTexto(clienteDe(a)) ? `<div class="small">${esc(clienteTexto(clienteDe(a)))}</div>` : ''}</td>${cols.map(([, , c, f]) => `<td class="${c}">${f(a)}</td>`).join('')}<td class="r">${brl(a.valor_total)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="${2 + cols.length}">${lista.length} atividade(s)</td><td class="r">${brl(total)}</td></tr></tfoot></table></div>`;
+    const detalhe = (a) => { const d = a.dados || {}, ct = d.contrato || {}, ex = execDe(a);
+      return `<div class="rep-ev"><div class="h"><span class="seq">Nº ${pad(a.numero)}</span><b>${esc(a.nome)}</b>${clienteTexto(clienteDe(a)) ? `<span class="tag">${esc(clienteTexto(clienteDe(a)))}</span>` : ''}${pill(a.situacao)}<span class="sp"></span><span class="v">${brl(a.valor_total)}</span></div>
+      <div class="i">${esc(a.tipo)} · ${datasAtv(a)} · Gerente: ${esc(a.gerente || '—')}${(ct.tipo || ct.pagamento) ? ' · Contrato: ' + esc(contratoTxt(ct)) : ''}</div>
+      ${(d.servicos || []).length ? `<table class="mini"><tbody>${d.servicos.map((x) => `<tr><td style="width:120px"><b>${esc(x.tipo || 'Serviço')}</b></td><td>${esc(x.formato || '')}</td><td>${esc(x.responsavel ? 'Resp.: ' + x.responsavel : '')}</td><td>${esc(x.email || '')}</td></tr>`).join('')}</tbody></table>` : ''}
+      <div class="i"><b>Execução:</b> ${ex?.conclusao ? `concluída em ${fdate(ex.conclusao)}${ex.por ? ' (registrado por ' + esc(ex.por) + ')' : ''}` : 'ainda não concluída'}${ex?.obs ? ' — ' + esc(ex.obs) : ''}${a.realizado ? ' · <b>realizada</b>' : ''}</div></div>`; };
+
+    $('#rOut').innerHTML = `<div class="card report">
+      <div class="report-actions no-print" style="margin-bottom:18px">
+        <a class="btn" href="#/painel">${ic('x')}Sair</a>
+        <button class="btn" id="rPrint">${ic('printer')}Imprimir / PDF</button>
+        <button class="btn" id="rImg" title="Gera uma imagem do relatório para enviar pelo WhatsApp">${ic('image')}Enviar imagem</button>
+        <button class="btn" id="rPdf" title="Gera um PDF do relatório para enviar pelo WhatsApp ou e-mail">${ic('file')}Enviar PDF</button>
+        <button class="btn" id="rWa" title="Envia o resumo em texto pelo WhatsApp">${ic('whats')}WhatsApp (texto)</button>
+        <button class="btn" id="rMail">${ic('mail')}E-mail</button>
+        <button class="btn" id="rCsv">${ic('download')}Excel</button>
+      </div>
+      <div class="report-head"><img src="assets/logo-dello.png" alt="Dello"><div><h2>Relatório de atividades</h2><div class="small muted">${esc(desc)}${R.formato === 'detalhado' ? ' · detalhado' : ''}</div></div>
+        <span class="sp"></span><div class="meta">Gerado em ${fdt(new Date())}<br>por ${esc(S.me.nome)}</div></div>
+      ${lista.length ? `<div class="report-sum"><div><span>Atividades</span><b>${lista.length}</b></div><div><span>Concluídas</span><b>${conc}</b></div><div><span>Realizadas</span><b>${lista.filter((a) => a.realizado).length}</b></div><div class="hl"><span>Valor total</span><b>${brl(total)}</b></div></div>
+        ${tabela}${R.formato === 'detalhado' ? lista.map(detalhe).join('') : ''}` : vazio('search', 'Nenhuma atividade encontrada', 'Ajuste os filtros e gere novamente.')}
+    </div>`;
+
+    const texto = `*Relatório de atividades — Dello*\n${desc}\n${lista.length} atividade(s) · Total ${brl(total)}\n\n` +
+      (R.formato === 'detalhado' ? lista.map(textoAtividade).join('\n\n')
+        : lista.map((a) => `• Nº ${pad(a.numero)} ${a.nome} (${SIT[a.situacao].label}) — ${datasAtv(a)}${responsaveisDe(a).length ? ' — Resp.: ' + responsaveisDe(a).join(', ') : ''}${execDe(a)?.conclusao ? ' — concluída ' + fdate(execDe(a).conclusao) : ''} — ${brl(a.valor_total)}`).join('\n'));
+    $('#rPrint').addEventListener('click', () => window.print());
+    $('#rWa').addEventListener('click', () => window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank', 'noopener'));
+    $('#rMail').addEventListener('click', () => { location.href = 'mailto:?subject=' + encodeURIComponent('Relatório de atividades — Dello') + '&body=' + encodeURIComponent(texto.replace(/\*/g, '')); });
+    $('#rCsv').addEventListener('click', () => exportarCsvAtv(lista));
+    $('#rImg').addEventListener('click', (x) => enviarRelatorio('imagem', x.currentTarget, 'relatorio-atividades-dello'));
+    $('#rPdf').addEventListener('click', (x) => enviarRelatorio('pdf', x.currentTarget, 'relatorio-atividades-dello'));
+  }
+  gerar();
+}
+
 async function viewRelatorios() {
-  setPage('Relatórios', 'Monte, imprima e compartilhe relatórios de eventos');
+  setPage('Relatórios', 'Monte, imprima e compartilhe relatórios de eventos e de atividades');
+  if (S.relTipo === 'atividades') return viewRelAtividades();
   carregando();
   const evs = S.eventos = await api.listEventos();
   const gerentes = uniq(evs.map((e) => e.gerente));
@@ -2259,7 +2457,7 @@ async function viewRelatorios() {
   R.feito ||= 'todos';
   R.cols ||= COLS_REL.map(([k]) => k);
 
-  view().innerHTML = `<div class="card no-print">
+  view().innerHTML = `${relSwitch()}<div class="card no-print">
     <div class="rep-filters">
       <div class="field"><label>Relatório por</label><select id="rPor">
         ${[['situacao', 'Situação'], ['evento', 'Evento'], ['cliente', 'Cliente'], ['gerente', 'Gerente'], ['tipo', 'Tipo de evento'], ['periodo', 'Data a ser realizado']].map(([v, l]) => `<option value="${v}" ${R.por === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -2288,6 +2486,7 @@ async function viewRelatorios() {
     if (R.por === 'tipo') p.innerHTML = sel('Tipo', tiposDe(evs).map((t) => [t, t]), 'Todos os tipos');
     if (R.por === 'periodo') p.innerHTML = `<div class="grid g2"><div class="field"><label>De</label><input type="date" id="rDe" value="${R.de}"></div><div class="field"><label>Até</label><input type="date" id="rAte" value="${R.ate}"></div></div>`;
   };
+  ligarSwitch();
   $('#rPor').onchange = (e) => { R.por = e.target.value; R.val = ''; param(); };
   $('#rFmt').onchange = (e) => { R.formato = e.target.value; gerar(); };
   $('#rGerar').onclick = () => gerar();
@@ -2488,9 +2687,28 @@ async function gerarEEnviar(formato, botao, el, nomeBase, oque, largura) {
   } catch (x) { toast(msgErro(x), 'err'); }
   finally { botao.disabled = false; botao.innerHTML = antes; }
 }
-const enviarRelatorio = (formato, botao) => gerarEEnviar(formato, botao, $('.report'), `relatorio-eventos-dello-${hojeISO()}`, 'do relatório', 980);
+const enviarRelatorio = (formato, botao, base = 'relatorio-eventos-dello') => gerarEEnviar(formato, botao, $('.report'), `${base}-${hojeISO()}`, 'do relatório', 980);
 const enviarFicha = (formato, botao, reg, tipo) => gerarEEnviar(formato, botao, $('.ficha'),
   `${tipo}-${pad(reg.numero)}-${nomeArquivo(reg.nome).toLowerCase().slice(0, 50)}`, 'da ficha', 760);
+
+function baixarCsv(cab, linhas, nome) {
+  const q = (x) => { let t = String(x ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
+  const blob = new Blob(['\ufeff' + [cab, ...linhas].map((l) => l.map(q).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${nome}-${hojeISO()}.csv`;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function exportarCsvAtv(lista) {
+  const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
+  baixarCsv(['Nº', 'Situação', 'Realizada', 'Tipo', 'Atividade', 'Cód. cliente', 'Cliente', 'Gerente', 'Início', 'Prazo de entrega', 'Serviços', 'Responsável pela execução',
+    'Data de conclusão', 'Obs. da execução', 'Tipo do contrato', 'Forma de pagamento', 'Valor', 'Cadastrado por'],
+  lista.map((a) => { const ct = a.dados?.contrato || {}, ex = execDe(a) || {};
+    return [pad(a.numero), SIT[a.situacao]?.label, a.realizado ? 'Sim' : 'Não', a.tipo, a.nome, clienteDe(a).codigo || '', clienteDe(a).nome || '', a.gerente, fdate(a.data_inicio), fdate(a.data_fim),
+      (a.dados?.servicos || []).map((x) => [x.tipo, x.formato].filter(Boolean).join(' — ')).join(' | '), responsaveisDe(a).join(', '),
+      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(a.valor_total), nomeDe(a.criado_por)]; }), 'atividades-dello');
+}
 
 function exportarCsv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
@@ -2515,12 +2733,13 @@ function exportarCsv(lista) {
 /* ================================================================
    Histórico
    ================================================================ */
-const CAMPOS_H = { situacao: 'Situação', nome: 'Nome', tipo: 'Tipo', local: 'Local', gerente: 'Gerente', data_inicio: 'Início', data_fim: 'Término / prazo', valor_total: 'Valor total', visibilidade: 'Visibilidade', realizado: 'Realizado' };
+const CAMPOS_H = { situacao: 'Situação', nome: 'Nome', tipo: 'Tipo', local: 'Local', gerente: 'Gerente', data_inicio: 'Início', data_fim: 'Término / prazo', valor_total: 'Valor total', visibilidade: 'Visibilidade', realizado: 'Realizado', conclusao: 'Data de conclusão' };
 function fmtCampo(k, v) {
   if (v == null || v === '') return '—';
   if (k === 'situacao') return SIT[v]?.label || v;
   if (k === 'visibilidade') return v === 'privado' ? 'Privado' : 'Para todos';
   if (k === 'realizado') return v ? 'Sim' : 'Não';
+  if (k === 'conclusao') return fdate(v);
   if (k === 'valor_total') return brl(v);
   if (k.startsWith('data_')) return fdate(v);
   return String(v);
@@ -2562,7 +2781,7 @@ async function viewHistorico() {
    ================================================================ */
 async function viewUsuarios() {
   if (!isAdmin()) { location.hash = '#/painel'; return; }
-  setPage('Usuários', 'Aprove acessos e defina quem é administrador');
+  setPage('Usuários', 'Aprove acessos e defina o papel de cada pessoa');
   carregando();
   const [perfis, evs] = await Promise.all([api.listPerfis(), api.listEventos()]);
   S.perfis = perfis;
@@ -2574,7 +2793,8 @@ async function viewUsuarios() {
   view().innerHTML = `
     <div class="info">${ic('info')}<div><b>Como dar acesso a alguém:</b> envie o link do sistema. A pessoa clica em <b>Criar conta</b> e aparece aqui como <b>Pendente</b>. Ligue o acesso e escolha o papel.<br>
       <b>Atenção:</b> o e-mail não é verificado automaticamente. Antes de liberar, confirme com a pessoa (WhatsApp ou pessoalmente) que foi ela mesma que se cadastrou.<br>
-      <b>Administrador</b> edita e exclui qualquer evento e gerencia usuários. <b>Usuário</b> vê todos os eventos, mas edita e exclui só os que criou.</div></div>
+      <b>Administrador</b> edita e exclui tudo e gerencia usuários. <b>Usuário</b> vê tudo, cadastra e edita só o que criou.
+      <b>Executor</b> só vê: não cadastra nem altera. Nas atividades em que o nome dele está como <b>responsável pela execução</b>, registra a data de conclusão, uma observação e fotos.</div></div>
     ${pend.length ? `<div class="info warn">${ic('hourglass')}<div><b>${pend.length} pessoa(s) aguardando aprovação.</b></div></div>` : ''}
     <div class="card"><div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Pessoa</th><th>Papel</th><th>Acesso</th><th class="right">Eventos criados</th><th>Desde</th><th></th></tr></thead>
@@ -2582,7 +2802,7 @@ async function viewUsuarios() {
         const eu = p.id === S.me.id;
         return `<tr data-id="${p.id}">
           <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar sm">${esc(iniciais(p.nome))}</div><div style="min-width:0"><b>${esc(p.nome)}</b>${eu ? ' <span class="tag">você</span>' : ''}<div class="small muted">${esc(p.email)}</div></div></div></td>
-          <td><select class="role-sel" data-papel ${eu ? 'disabled title="Você não pode alterar o próprio papel"' : ''}><option value="usuario" ${p.papel === 'usuario' ? 'selected' : ''}>Usuário</option><option value="admin" ${p.papel === 'admin' ? 'selected' : ''}>Administrador</option></select></td>
+          <td><select class="role-sel" data-papel ${eu ? 'disabled title="Você não pode alterar o próprio papel"' : ''}>${Object.entries(PAPEIS).map(([v, l]) => `<option value="${v}" ${p.papel === v ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
           <td><label class="toggle" ${eu ? 'style="opacity:.5;pointer-events:none"' : ''}><input type="checkbox" data-ativo ${p.ativo ? 'checked' : ''} ${eu ? 'disabled' : ''}><span class="sw"></span><span data-lbl>${p.ativo ? 'Liberado' : '<span class="pill amber">Pendente</span>'}</span></label></td>
           <td class="right num">${evs.filter((e) => e.criado_por === p.id).length}</td>
           <td class="small muted nowrap">${fdia(p.criado_em)}</td>
@@ -2604,7 +2824,7 @@ async function viewUsuarios() {
     }));
     papel.onchange = async () => {
       const antes = p.papel;
-      try { await api.updatePerfil(id, { papel: papel.value }); p.papel = papel.value; toast(`${p.nome} agora é ${papel.value === 'admin' ? 'administrador' : 'usuário'}`); }
+      try { await api.updatePerfil(id, { papel: papel.value }); p.papel = papel.value; toast(`${p.nome} agora é ${PAPEIS[papel.value].toLowerCase()}`); }
       catch (e) { papel.value = antes; toast(msgErro(e), 'err'); }
     };
     ativo.onchange = async () => {

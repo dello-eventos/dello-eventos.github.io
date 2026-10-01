@@ -933,3 +933,47 @@ html.tema-anim, html.tema-anim *, html.tema-anim *::before, html.tema-anim *::af
 .rep-cols { margin-top: 10px; padding-top: 10px; }
 table.mini td.c, table.mini th.c { text-align: center; }
 @media (max-width: 640px) { .rep-sep { display: none; } .rep-sits .lbl { width: 100%; } }
+
+/* ---------- situação como bolinha colorida no Nº ---------- */
+.sit-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; vertical-align: middle; box-shadow: 0 0 0 2px var(--card), 0 0 0 3px rgba(0, 0, 0, .1); flex: none; }
+.tbl td.c-num { white-space: nowrap; }
+.c-meta .sit-dot { width: 9px; height: 9px; margin-right: 5px; }
+.rep-ico { display: inline-flex; vertical-align: middle; color: var(--brand-700); }
+.rep-ico svg.i { width: 14px; height: 14px; }
+.tag.rep { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; background: var(--brand-50); color: var(--brand-700); }
+.tag.rep svg.i { width: 13px; height: 13px; }
+.rep-anual { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin: -4px 0 18px; padding: 10px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line-2); }
+.rep-anual .toggle { gap: 8px; }
+.rep-anual .toggle svg.i { width: 16px; height: 16px; color: var(--brand-700); }
+.rep-anual .hint { margin: 0; }
+
+/* ---------- execução das atividades ---------- */
+.tbl td.c-resp { min-width: 140px; }
+.exec-tag { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 700; white-space: nowrap;
+  background: var(--amber-bg); color: var(--warn-ink); }
+.exec-tag.ok { background: var(--green-bg); color: var(--ok-ink); }
+.exec-tag svg.i { width: 13px; height: 13px; }
+.exec-card h3 { display: inline-flex; align-items: center; gap: 8px; }
+.exec-card h3 svg.i { color: var(--mute); }
+.exec-card.feita h3 svg.i { color: var(--green); }
+.exec-card .exec-tag { margin-top: 0; }
+tr.minha td.c-main .ev-name::after { content: 'você executa'; margin-left: 8px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 700; background: var(--blue-bg); color: var(--info-ink); vertical-align: middle; }
+.exec-painel { margin-bottom: 18px; }
+.exec-painel h3 { display: inline-flex; align-items: center; gap: 8px; }
+.exec-painel h3 svg.i { color: var(--brand-700); }
+
+/* executor: sem botões de cadastrar, duplicar ou editar */
+body.papel-executor a[href$="/novo"], body.papel-executor a[href$="/nova"], body.papel-executor a[href*="/duplicar"] { display: none !important; }
+@media (max-width: 640px) {
+  .tbl.cards td.c-done { grid-row: 2; }
+  .tbl.cards td.c-main .exec-tag { margin-top: 6px; }
+}
+
+/* relatório: escolha eventos x atividades */
+.rel-tipo { margin-bottom: 16px; }
+.rel-tipo label > svg.i { margin: 0 4px; }
+.rep-filters.rep-atv { grid-template-columns: 230px minmax(0, 1fr) 210px 230px auto; }
+.rep-filters.rep-atv .grid.g2 { gap: 10px; }
+@media (max-width: 1200px) { .rep-filters.rep-atv { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .rep-filters.rep-atv { grid-template-columns: minmax(0, 1fr); } }
+@media print { .rel-tipo { display: none !important; } }
