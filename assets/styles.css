@@ -977,3 +977,51 @@ body.papel-executor a[href$="/novo"], body.papel-executor a[href$="/nova"], body
 @media (max-width: 1200px) { .rep-filters.rep-atv { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 640px) { .rep-filters.rep-atv { grid-template-columns: minmax(0, 1fr); } }
 @media print { .rel-tipo { display: none !important; } }
+
+/* ---------- calendário ---------- */
+.cal-card { padding-bottom: 18px; }
+.cal-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.cal-nav { display: flex; align-items: center; gap: 8px; }
+.cal-nav h2 { margin: 0 6px; font-size: 20px; min-width: 210px; text-align: center; }
+.cal-filtros, .cal-sits { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cal-sits { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line-2); }
+.cal-filtros .chk-sit, .cal-sits .chk-sit { padding: 6px 12px; border: 1.5px solid var(--line); border-radius: 99px; background: var(--card); }
+.cal-filtros .chk-sit:has(input:checked), .cal-sits .chk-sit:has(input:checked) { border-color: var(--brand); background: var(--brand-50); color: var(--ink); }
+.cal-filtros .chk-sit svg.i { width: 15px; height: 15px; color: var(--brand-700); }
+.cal-leg { display: inline-flex; gap: 8px; align-items: center; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.cal-dow { padding: 8px 10px; font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--mute); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.cal-dia { min-height: 118px; padding: 6px 6px 8px; border-right: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); background: var(--card); min-width: 0; }
+.cal-dia:nth-child(7n) { border-right: 0; }
+.cal-dia.fora { background: var(--surface-2); }
+.cal-dia.fora .cal-n { color: var(--placeholder); }
+.cal-dia.sel { box-shadow: inset 0 0 0 2px var(--brand); }
+.cal-n { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px; margin-bottom: 4px; border: 0; border-radius: 99px; background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.cal-n:hover { background: var(--line-2); }
+.cal-dia.hoje .cal-n { background: var(--brand); color: #fff; }
+.cal-itens { display: flex; flex-direction: column; gap: 3px; }
+.cal-chip { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 3px 7px; border-radius: 6px; font-size: 12px; font-weight: 600; line-height: 1.25; text-decoration: none; color: var(--ink);
+  background: color-mix(in srgb, var(--c) 16%, var(--card)); border-left: 3px solid var(--c); }
+.cal-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-chip:hover { background: color-mix(in srgb, var(--c) 28%, var(--card)); }
+.cal-chip.atividade { border-left-style: dashed; background: var(--card); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent); }
+.cal-chip.meio, .cal-chip.fim { border-left-color: transparent; }
+.cal-chip.meio span, .cal-chip.fim span { opacity: .75; }
+.cal-chip.feito { opacity: .6; }
+.cal-chip.feito span { text-decoration: line-through; }
+.cal-chip svg.i { width: 12px; height: 12px; flex: none; }
+.cal-chip.leg { --c: var(--mute); display: inline-flex; font-size: 11.5px; }
+.cal-mais { border: 0; background: none; padding: 2px 4px; text-align: left; font: inherit; font-size: 12px; font-weight: 700; color: var(--brand-700); cursor: pointer; }
+.cal-pts { display: none; }
+.tag.atv { background: var(--blue-bg); color: var(--info-ink); }
+@media (max-width: 1100px) { .cal-dia { min-height: 96px; } .cal-chip { font-size: 11px; padding: 2px 5px; } }
+@media (max-width: 640px) {
+  .cal-nav h2 { min-width: 0; font-size: 17px; }
+  .cal-dia { min-height: 54px; padding: 4px 2px; text-align: center; cursor: pointer; }
+  .cal-dow { padding: 6px 2px; text-align: center; font-size: 10.5px; }
+  .cal-itens, .cal-leg { display: none; }
+  .cal-pts { display: flex; justify-content: center; gap: 3px; flex-wrap: wrap; }
+  .cal-pts i { width: 6px; height: 6px; border-radius: 50%; }
+  .cal-n { margin-bottom: 2px; }
+}
+@media print { .cal-top .btn, .cal-filtros, .cal-sits { display: none !important; } }
