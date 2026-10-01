@@ -2100,6 +2100,14 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       toast(`Confira o ano da data: ${fdate(dataRuim.value)}. O ano precisa ter 4 dígitos (ex.: 2027).`, 'err'); return;
     }
     if (f.data_inicio && f.data_fim && f.data_fim < f.data_inicio) return erro('fim', A ? 'O prazo de entrega é anterior à data de início.' : 'A data de término é anterior à data de início.');
+    // duração muito longa costuma ser erro de digitação no ano (ex.: 27/10/2026 a 29/10/2027)
+    if (f.data_inicio && f.data_fim) {
+      const dias = Math.round((new Date(f.data_fim + 'T12:00:00') - new Date(f.data_inicio + 'T12:00:00')) / 864e5);
+      if (dias > (A ? 365 : 45)) {
+        const ok = await confirmar('Confira as datas', `${A ? 'Do início ao prazo de entrega' : 'Este evento dura'} ${dias} dias (${fdate(f.data_inicio)} a ${fdate(f.data_fim)}). Pode ser o ano digitado errado. Quer salvar assim mesmo?`, { icon: 'calendar', ok: 'Salvar assim mesmo' });
+        if (!ok) { const el = $('#f-fim'); el?.classList.add('invalid'); el?.focus(); return; }
+      }
+    }
     const dd = f.dados;
     if (A) {
       dd.servicos = dd.servicos.filter((x) => x.tipo || x.formato || x.responsavel || x.email);
