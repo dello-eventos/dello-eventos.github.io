@@ -2888,6 +2888,50 @@ async function viewHistorico() {
 /* ================================================================
    Usuários (somente admin)
    ================================================================ */
+// O que cada papel pode fazer (igual às regras do banco de dados)
+// 1 = pode · 0.5 = pode em parte (com explicação) · 0 = não pode
+const PERMISSOES = [
+  ['Ver eventos, atividades, calendário e relatórios', [1, 1, 1]],
+  ['Ver cadastros marcados como privado por outras pessoas', [1, 0, 0]],
+  ['Cadastrar eventos e atividades', [1, 1, 0]],
+  ['Editar e excluir', [[1, 'de qualquer pessoa'], [0.5, 'só o que criou'], 0]],
+  ['Marcar como realizado (bolinha)', [[1, 'qualquer um'], [0.5, 'só o que criou'], 0]],
+  ['Registrar conclusão, observação e fotos da execução', [[1, 'qualquer atividade'], [0.5, 'nas que criou ou em que é responsável'], [0.5, 'só onde é o responsável']]],
+  ['Aprovar acessos e mudar papéis', [1, 0, 0]],
+];
+const PAPEL_INFO = {
+  admin: { ic: 'shield', cor: 'brand', resumo: 'Controla tudo: edita qualquer cadastro e gerencia as pessoas.' },
+  usuario: { ic: 'user', cor: 'blue', resumo: 'Trabalha no dia a dia: cadastra e cuida do que é seu.' },
+  executor: { ic: 'check', cor: 'green', resumo: 'Só executa: vê tudo e registra a conclusão das suas atividades.' },
+};
+function papeisHtml(perfis) {
+  const aberto = store.get('dello.papeis') !== 'fechado';
+  const chave = Object.keys(PAPEIS);
+  return `<section class="card papeis ${aberto ? '' : 'fechado'}" id="papeis">
+    <button type="button" class="papeis-h" id="papeisTgl" aria-expanded="${aberto}">
+      <span class="papeis-ic">${ic('key')}</span>
+      <span class="grow"><b>Papéis e permissões</b><small>O que cada tipo de pessoa pode fazer no sistema</small></span>
+      <span class="papeis-btn">${aberto ? 'Esconder' : 'Mostrar'}${ic('chevR')}</span>
+    </button>
+    <div class="papeis-corpo">
+      <div class="papeis-grid">${chave.map((k, i) => {
+        const inf = PAPEL_INFO[k], n = perfis.filter((x) => x.ativo && x.papel === k).length;
+        return `<div class="papel-card ${inf.cor}">
+          <div class="papel-top"><span class="papel-ic">${ic(inf.ic)}</span><div class="grow"><h4>${PAPEIS[k]}</h4><span class="papel-n">${n ? `${n} pessoa${n > 1 ? 's' : ''}` : 'ninguém ainda'}</span></div></div>
+          <p class="papel-res">${inf.resumo}</p>
+          <ul class="perm">${PERMISSOES.map(([txt, vals]) => {
+            const v = vals[i], nivel = Array.isArray(v) ? v[0] : v, obs = Array.isArray(v) ? v[1] : '';
+            const st = nivel === 1 ? 'sim' : nivel ? 'parte' : 'nao';
+            return `<li class="${st}"><span class="perm-ic">${ic(st === 'nao' ? 'x' : 'check')}</span><span>${txt}${obs ? `<small>${obs}</small>` : ''}</span></li>`;
+          }).join('')}</ul>
+        </div>`;
+      }).join('')}</div>
+      <div class="papeis-leg"><span class="sim"><span class="perm-ic">${ic('check')}</span>Pode</span><span class="parte"><span class="perm-ic">${ic('check')}</span>Pode em parte</span><span class="nao"><span class="perm-ic">${ic('x')}</span>Não pode</span>
+        <span class="sp"></span><span class="small muted">Essas regras valem no banco de dados, não só na tela.</span></div>
+    </div>
+  </section>`;
+}
+
 async function viewUsuarios() {
   if (!isAdmin()) { location.hash = '#/painel'; return; }
   setPage('Usuários', 'Aprove acessos e defina o papel de cada pessoa');
@@ -2901,9 +2945,8 @@ async function viewUsuarios() {
 
   view().innerHTML = `
     <div class="info">${ic('info')}<div><b>Como dar acesso a alguém:</b> envie o link do sistema. A pessoa clica em <b>Criar conta</b> e aparece aqui como <b>Pendente</b>. Ligue o acesso e escolha o papel.<br>
-      <b>Atenção:</b> o e-mail não é verificado automaticamente. Antes de liberar, confirme com a pessoa (WhatsApp ou pessoalmente) que foi ela mesma que se cadastrou.<br>
-      <b>Administrador</b> edita e exclui tudo e gerencia usuários. <b>Usuário</b> vê tudo, cadastra e edita só o que criou.
-      <b>Executor</b> só vê: não cadastra nem altera. Nas atividades em que o nome dele está como <b>responsável pela execução</b>, registra a data de conclusão, uma observação e fotos.</div></div>
+      <b>Atenção:</b> o e-mail não é verificado automaticamente. Antes de liberar, confirme com a pessoa (WhatsApp ou pessoalmente) que foi ela mesma que se cadastrou.</div></div>
+    ${papeisHtml(perfis)}
     ${pend.length ? `<div class="info warn">${ic('hourglass')}<div><b>${pend.length} pessoa(s) aguardando aprovação.</b></div></div>` : ''}
     <div class="card"><div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Pessoa</th><th>Papel</th><th>Acesso</th><th class="right">Eventos criados</th><th>Desde</th><th></th></tr></thead>
@@ -2918,6 +2961,13 @@ async function viewUsuarios() {
           <td class="right">${eu ? '' : `<button class="btn btn-sm" data-senha title="Definir uma senha provisória para esta pessoa">${ic('key')}Senha provisória</button>`}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
 
+  $('#papeisTgl').onclick = () => {
+    const sec = $('#papeis'), fechar = !sec.classList.contains('fechado');
+    sec.classList.toggle('fechado', fechar);
+    $('#papeisTgl').setAttribute('aria-expanded', String(!fechar));
+    $('.papeis-btn').firstChild.textContent = fechar ? 'Mostrar' : 'Esconder';
+    store.set('dello.papeis', fechar ? 'fechado' : 'aberto');
+  };
   $$('tr[data-id]').forEach((tr) => {
     const id = tr.dataset.id, p = perfis.find((x) => x.id === id);
     const papel = $('[data-papel]', tr), ativo = $('[data-ativo]', tr);

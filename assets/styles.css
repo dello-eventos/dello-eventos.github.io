@@ -1025,3 +1025,38 @@ body.papel-executor a[href$="/novo"], body.papel-executor a[href$="/nova"], body
   .cal-n { margin-bottom: 2px; }
 }
 @media print { .cal-top .btn, .cal-filtros, .cal-sits { display: none !important; } }
+
+/* ---------- papéis e permissões ---------- */
+.papeis { padding: 0; overflow: hidden; margin-bottom: 18px; }
+.papeis-h { display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px 20px; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.papeis-h:hover { background: var(--surface-2); }
+.papeis-h b { display: block; font-size: 15.5px; }
+.papeis-h small { display: block; font-size: 12.5px; color: var(--mute); }
+.papeis-ic { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--brand-50); color: var(--brand-700); flex: none; }
+.papeis-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; color: var(--brand-700); }
+.papeis-btn svg.i { width: 16px; height: 16px; transform: rotate(90deg); transition: transform .2s; }
+.papeis.fechado .papeis-btn svg.i { transform: rotate(0deg); }
+.papeis.fechado .papeis-corpo { display: none; }
+.papeis-corpo { padding: 4px 20px 18px; border-top: 1px solid var(--line-2); }
+.papeis-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
+.papel-card { --pc: var(--brand); --pbg: var(--brand-50); border: 1px solid var(--line); border-top: 4px solid var(--pc); border-radius: 12px; padding: 16px; background: var(--card); }
+.papel-card.blue { --pc: var(--blue); --pbg: var(--blue-bg); }
+.papel-card.green { --pc: var(--green); --pbg: var(--green-bg); }
+.papel-top { display: flex; align-items: center; gap: 12px; }
+.papel-ic { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--pbg); color: var(--pc); flex: none; }
+.papel-ic svg.i { width: 20px; height: 20px; }
+.papel-top h4 { margin: 0; font-size: 16px; }
+.papel-n { font-size: 12px; font-weight: 600; color: var(--mute); }
+.papel-res { margin: 10px 0 12px; font-size: 13px; color: var(--ink-2); min-height: 2.6em; }
+.perm { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.perm li { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.35; }
+.perm li small { display: block; font-size: 11.5px; color: var(--mute); }
+.perm li.nao { color: var(--mute); }
+.perm-ic { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; flex: none; margin-top: 1px; }
+.perm-ic svg.i { width: 12px; height: 12px; stroke-width: 3; }
+.sim > .perm-ic { background: var(--green-bg); color: var(--green); }
+.parte > .perm-ic { background: var(--amber-bg); color: var(--amber); }
+.nao > .perm-ic { background: var(--line-2); color: var(--placeholder); }
+.papeis-leg { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 14px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.papeis-leg > span:not(.sp) { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 1100px) { .papeis-grid { grid-template-columns: minmax(0, 1fr); } .papel-res { min-height: 0; } }
