@@ -904,6 +904,7 @@ function renderShell() {
       <nav class="nav">
         <div class="grp">Geral</div>
         <a href="#/painel" data-r="painel">${ic('grid')}Painel</a>
+        <a href="#/calendario" data-r="calendario">${ic('calendar')}Calendário</a>
         <div class="grp">Cadastros</div>
         <a href="#/eventos" data-r="eventos">${ic('calendar')}Eventos</a>
         <a href="#/atividades" data-r="atividades">${ic('megaphone')}Atividades</a>
@@ -985,6 +986,7 @@ const vazio = (icon, t, p, btn = '') => `<div class="empty"><div class="ico">${i
    ================================================================ */
 const ROTAS = [
   [/^#\/painel$/, 'painel', () => viewPainel()],
+  [/^#\/calendario$/, 'calendario', () => viewCalendario()],
   [/^#\/eventos$/, 'eventos', () => viewEventos()],
   [/^#\/eventos\/novo$/, 'novo', () => viewForm(null)],
   [/^#\/eventos\/([\w-]+)\/editar$/, 'eventos', (m) => viewForm(m[1])],
@@ -2323,6 +2325,113 @@ async function viewDetalheAtv(id) {
   }
   api.historico(a.id).then((hs) => { $('#dHist') && ($('#dHist').innerHTML = hs.length ? timeline(hs, false) : '<p class="muted small" style="margin:0">Sem registros.</p>'); })
     .catch(() => { $('#dHist') && ($('#dHist').innerHTML = '<p class="muted small">Não foi possível carregar o histórico.</p>'); });
+}
+
+/* ================================================================
+   Calendário: eventos (do início ao término) e atividades (no prazo de entrega)
+   ================================================================ */
+const MESES_LONGOS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const DIAS_SEM = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+async function viewCalendario() {
+  setPage('Calendário', 'Todos os eventos e atividades do mês. Clique em um item para abrir.');
+  carregando();
+  const [evs, atvs] = await Promise.all([api.listEventos(), api.listAtividades().catch(() => [])]);
+  S.eventos = evs; S.atividades = atvs;
+  const C = S.cal || (S.cal = { mes: hojeISO().slice(0, 7), ev: true, atv: true, feitos: true, sits: [...SIT_ORDEM], dia: '' });
+
+  // Itens do calendário. Evento: todos os dias do início ao término. Atividade: no prazo de entrega (ou no início, se não tiver prazo).
+  const itens = [
+    ...evs.filter((e) => e.data_inicio || e.data_fim).map((e) => ({ k: 'evento', r: e, de: e.data_inicio || e.data_fim, ate: (e.data_fim && e.data_fim >= (e.data_inicio || '')) ? e.data_fim : (e.data_inicio || e.data_fim),
+      url: '#/eventos/' + e.id, quando: periodo(e) })),
+    ...atvs.filter((a) => a.data_fim || a.data_inicio).map((a) => ({ k: 'atividade', r: a, de: a.data_fim || a.data_inicio, ate: a.data_fim || a.data_inicio,
+      url: '#/atividades/' + a.id, quando: a.data_fim ? 'Prazo de entrega ' + fdate(a.data_fim) : 'Início ' + fdate(a.data_inicio) })),
+  ];
+  const semData = evs.filter((e) => !e.data_inicio && !e.data_fim).length + atvs.filter((a) => !a.data_inicio && !a.data_fim).length;
+
+  view().innerHTML = `<div class="card cal-card">
+    <div class="cal-top">
+      <div class="cal-nav">
+        <button class="btn icon-btn" id="cAnt" title="Mês anterior" aria-label="Mês anterior">${ic('chevL')}</button>
+        <h2 id="cTit"></h2>
+        <button class="btn icon-btn" id="cProx" title="Próximo mês" aria-label="Próximo mês">${ic('chevR')}</button>
+        <button class="btn btn-sm" id="cHoje">Hoje</button>
+      </div>
+      <span class="sp"></span>
+      <div class="cal-filtros">
+        <label class="chk-sit"><input type="checkbox" id="cEv" ${C.ev ? 'checked' : ''}>${ic('calendar')}Eventos</label>
+        <label class="chk-sit"><input type="checkbox" id="cAtv" ${C.atv ? 'checked' : ''}>${ic('megaphone')}Atividades</label>
+        <label class="chk-sit"><input type="checkbox" id="cFeitos" ${C.feitos ? 'checked' : ''}>${ic('check')}Mostrar realizados</label>
+      </div>
+    </div>
+    <div class="cal-sits">${SIT_ORDEM.map((x) => `<label class="chk-sit"><input type="checkbox" value="${x}" ${C.sits.includes(x) ? 'checked' : ''}><span class="d" style="background:${SIT[x].hex}"></span>${SIT[x].label}</label>`).join('')}
+      <span class="sp"></span><span class="small muted cal-leg"><span class="cal-chip leg evento">Evento</span><span class="cal-chip leg atividade">Atividade (prazo)</span></span></div>
+    <div class="cal-grid" id="cGrid"></div>
+  </div>
+  <div class="card"><div class="card-h"><h3 id="cListaTit"></h3><span class="sp"></span><button class="btn btn-sm hidden" id="cTodos">Ver o mês inteiro</button></div><div id="cLista"></div>
+    ${semData ? `<p class="small muted" style="margin:12px 0 0">${semData} cadastro(s) sem data não aparecem no calendário.</p>` : ''}</div>`;
+
+  const visivel = (it) => (it.k === 'evento' ? C.ev : C.atv) && (C.feitos || !it.r.realizado) && C.sits.includes(it.r.situacao);
+  const doDia = (d) => itens.filter((it) => visivel(it) && it.de <= d && it.ate >= d)
+    .sort((a, b) => (a.k === b.k ? 0 : a.k === 'evento' ? -1 : 1) || String(a.r.nome).localeCompare(String(b.r.nome), 'pt-BR'));
+  const chip = (it, d) => {
+    const inicio = it.de === d, fim = it.ate === d, multi = it.de !== it.ate;
+    return `<a class="cal-chip ${it.k} ${it.r.realizado ? 'feito' : ''} ${multi ? (inicio ? 'ini' : fim ? 'fim' : 'meio') : ''}" href="${it.url}" style="--c:${SIT[it.r.situacao]?.hex || '#999'}"
+      title="${esc(`${it.k === 'evento' ? 'Evento' : 'Atividade'} Nº ${pad(it.r.numero)} — ${it.r.nome} · ${SIT[it.r.situacao]?.label || ''} · ${it.quando}${it.r.realizado ? ' · realizado' : ''}`)}">${it.r.realizado ? ic('check') : ''}<span>${esc(it.r.nome)}</span></a>`;
+  };
+
+  const desenhar = () => {
+    const [y, m] = C.mes.split('-').map(Number);
+    $('#cTit').textContent = `${MESES_LONGOS[m - 1]} de ${y}`;
+    const primeiro = `${C.mes}-01`;
+    const dow = new Date(primeiro + 'T12:00:00').getDay();
+    const ini = addDias(primeiro, -dow);
+    const ultimo = addDias(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`, -1);
+    const semanas = Math.ceil((dow + +ultimo.slice(8, 10)) / 7);
+    const hoje = hojeISO();
+    let html = DIAS_SEM.map((d) => `<div class="cal-dow">${d}</div>`).join('');
+    for (let i = 0; i < semanas * 7; i++) {
+      const d = addDias(ini, i), lst = doDia(d), fora = d.slice(0, 7) !== C.mes;
+      html += `<div class="cal-dia ${fora ? 'fora' : ''} ${d === hoje ? 'hoje' : ''} ${d === C.dia ? 'sel' : ''} ${lst.length ? 'tem' : ''}" data-dia="${d}">
+        <button type="button" class="cal-n" data-sel="${d}" title="Ver o dia ${fdate(d)}">${+d.slice(8, 10)}</button>
+        <div class="cal-itens">${lst.slice(0, 3).map((it) => chip(it, d)).join('')}${lst.length > 3 ? `<button type="button" class="cal-mais" data-sel="${d}">+${lst.length - 3} mais</button>` : ''}</div>
+        <div class="cal-pts">${lst.slice(0, 6).map((it) => `<i style="background:${SIT[it.r.situacao]?.hex}"></i>`).join('')}</div>
+      </div>`;
+    }
+    $('#cGrid').innerHTML = html;
+    $$('#cGrid [data-sel]').forEach((b) => b.addEventListener('click', () => { C.dia = C.dia === b.dataset.sel ? '' : b.dataset.sel; desenhar(); }));
+    $$('#cGrid .cal-dia').forEach((c) => c.addEventListener('click', (x) => { if (x.target === c && matchMedia('(max-width: 640px)').matches) { C.dia = c.dataset.dia; desenhar(); } }));
+
+    // lista abaixo: o dia escolhido ou o mês inteiro
+    const fimMes = ultimo;
+    const lista = C.dia ? doDia(C.dia)
+      : itens.filter((it) => visivel(it) && it.de <= fimMes && it.ate >= primeiro).sort((a, b) => a.de.localeCompare(b.de) || String(a.r.nome).localeCompare(String(b.r.nome), 'pt-BR'));
+    $('#cListaTit').textContent = C.dia ? `Dia ${fdate(C.dia)} · ${lista.length} lançamento(s)` : `${MESES_LONGOS[m - 1]} · ${lista.length} lançamento(s)`;
+    $('#cTodos').classList.toggle('hidden', !C.dia);
+    $('#cLista').innerHTML = lista.length ? `<div class="list-ev">${lista.map((it) => {
+      const r = it.r, d = it.de;
+      return `<a href="${it.url}"><div class="datebox"><b>${d.slice(8, 10)}</b><span>${MESES[+d.slice(5, 7) - 1]}</span></div>
+        <div class="grow"><div class="t">${sitDot(r.situacao)}${esc(r.nome)}${r.realizado ? ` <span class="tag feito">${ic('check')}Realizado</span>` : ''}</div>
+          <div class="s">${it.k === 'evento' ? `Evento Nº ${pad(r.numero)} · ${esc(r.tipo)} · ${esc(it.quando)}${r.local ? ' · ' + esc(r.local) : ''}`
+            : `Atividade Nº ${pad(r.numero)} · ${esc(r.tipo)} · ${esc(it.quando)}${responsaveisDe(r).length ? ' · Resp.: ' + esc(responsaveisDe(r).join(', ')) : ''}`}</div></div>
+        <span class="tag ${it.k === 'evento' ? 'brand' : 'atv'}">${it.k === 'evento' ? 'Evento' : 'Atividade'}</span></a>`; }).join('')}</div>`
+      : `<p class="muted small" style="margin:0">Nada ${C.dia ? 'neste dia' : 'neste mês'} com os filtros escolhidos.</p>`;
+  };
+
+  const mudaMes = (n) => { const [y, m] = C.mes.split('-').map(Number); const t = y * 12 + (m - 1) + n; C.mes = `${Math.floor(t / 12)}-${String(t % 12 + 1).padStart(2, '0')}`; C.dia = ''; desenhar(); };
+  $('#cAnt').onclick = () => mudaMes(-1);
+  $('#cProx').onclick = () => mudaMes(1);
+  $('#cHoje').onclick = () => { C.mes = hojeISO().slice(0, 7); C.dia = hojeISO(); desenhar(); };
+  $('#cTodos').onclick = () => { C.dia = ''; desenhar(); };
+  $('#cEv').onchange = (x) => { C.ev = x.target.checked; desenhar(); };
+  $('#cAtv').onchange = (x) => { C.atv = x.target.checked; desenhar(); };
+  $('#cFeitos').onchange = (x) => { C.feitos = x.target.checked; desenhar(); };
+  $$('.cal-sits input').forEach((c) => c.addEventListener('change', () => {
+    C.sits = $$('.cal-sits input:checked').map((x) => x.value);
+    if (!C.sits.length) { c.checked = true; C.sits = [c.value]; toast('Deixe pelo menos uma situação marcada.', 'err'); }
+    desenhar();
+  }));
+  desenhar();
 }
 
 /* ================================================================
