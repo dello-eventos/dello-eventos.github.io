@@ -449,6 +449,17 @@ function SupaAPI() {
       const r = chk(await sb.from('atividades').delete().eq('id', id).select('id'));
       if (!r.length) throw new Error('permission denied');
     },
+    async conferir(id, kind, situacao) {
+      const patch = { revisar: false };
+      if (situacao) patch.situacao = situacao;
+      const r = chk(await sb.from(kind === 'atividade' ? 'atividades' : 'eventos').update(patch).eq('id', id).select('id'));
+      if (!r.length) throw new Error('permission denied');
+    },
+    async contarConferir() {
+      const n = async (t) => { const { count, error } = await sb.from(t).select('id', { count: 'exact', head: true }).eq('revisar', true); if (error) throw error; return count || 0; };
+      const [a, b] = await Promise.all([n('eventos'), n('atividades')]);
+      return a + b;
+    },
     async registrarExecucao(id, conclusao, obs) { return chk(await sb.rpc('registrar_execucao', { atividade: id, conclusao: conclusao || null, obs: obs || '' })); },
     async listPerfis() { return chk(await sb.from('perfis').select('*').order('nome')); },
     async updatePerfil(id, patch) {
@@ -498,6 +509,25 @@ function DemoAPI() {
   const perfil = (id) => db.perfis.find((p) => p.id === id);
   const isAdmin = () => perfil(atual)?.papel === 'admin' && perfil(atual)?.ativo;
   const podeEditar = (ev) => perfil(atual)?.papel !== 'executor' && (isAdmin() || ev.criado_por === atual);
+  // Conferência (igual ao banco): quem não é admin não aprova; tudo o que faz fica para conferir
+  const estavel = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v)) ? Object.fromEntries(Object.entries(v).sort()) : v);
+  const semControle = (o) => {
+    const c = clone(o || {});
+    ['id', 'numero', 'situacao', 'realizado', 'revisar', 'revisar_motivo', 'revisar_em', 'revisar_por', 'atualizado_por', 'atualizado_em', 'valor_total', 'criado_por', 'criado_em'].forEach((k) => delete c[k]);
+    if (c.dados) { delete c.dados.execucao; delete c.dados.proximo_id; }
+    return estavel(c);
+  };
+  const conferencia = (antes, depois) => {
+    if (isAdmin()) return;
+    let m = null;
+    if (!antes) m = 'criou';
+    else if (semControle(antes) !== semControle(depois)) m = 'alterou';
+    else if (!!antes.realizado !== !!depois.realizado) m = depois.realizado ? 'realizado' : 'desmarcou';
+    else if ((antes.dados?.execucao?.conclusao || null) !== (depois.dados?.execucao?.conclusao || null)) m = 'concluiu';
+    else if (estavel(antes.dados?.execucao || null) !== estavel(depois.dados?.execucao || null)) m = 'execucao';
+    depois.situacao = (!antes || m === 'alterou') ? 'analise' : antes.situacao;
+    if (m) Object.assign(depois, { revisar: true, revisar_motivo: antes?.revisar && antes.revisar_motivo === 'criou' && m === 'alterou' ? 'criou' : m, revisar_em: new Date().toISOString(), revisar_por: atual });
+  };
   const responsavelDemo = (a) => (a?.dados?.servicos || []).some((x) => String(x.responsavel || '').split(/\s*(?:[,/;&+]|\s+e\s+)\s*/)
     .some((n) => n.trim().toLowerCase() === String(perfil(atual)?.nome || '').trim().toLowerCase() && n.trim()));
   const visivel = (ev) => ev.visibilidade !== 'privado' || ev.criado_por === atual || isAdmin();
@@ -577,6 +607,7 @@ function DemoAPI() {
         const novo = { ...old, situacao: ev.situacao, tipo: ev.tipo, nome: ev.nome, local: ev.local, gerente: ev.gerente,
           visibilidade: ev.visibilidade === 'privado' ? 'privado' : 'todos',
           data_inicio: ev.data_inicio || null, data_fim: ev.data_fim || null, dados, valor_total: totalDe(dados), atualizado_por: atual, atualizado_em: agora };
+        conferencia(old, novo);
         const det = {};
         if (old.visibilidade !== novo.visibilidade) db.historico.forEach((h) => { if (h.evento_id === novo.id) h.evento_privado = novo.visibilidade === 'privado'; });
         ['situacao', 'nome', 'tipo', 'local', 'gerente', 'data_inicio', 'data_fim', 'valor_total', 'visibilidade'].forEach((k) => { if ((old[k] ?? null) !== (novo[k] ?? null)) det[k] = [old[k] ?? null, novo[k] ?? null]; });
@@ -590,6 +621,7 @@ function DemoAPI() {
         visibilidade: ev.visibilidade === 'privado' ? 'privado' : 'todos',
         data_inicio: ev.data_inicio || null, data_fim: ev.data_fim || null, dados, valor_total: totalDe(dados),
         criado_por: atual, criado_em: agora, atualizado_por: atual, atualizado_em: agora };
+      conferencia(null, novo);
       db.eventos.push(novo);
       log('criou', novo);
       salvar();
@@ -600,7 +632,9 @@ function DemoAPI() {
       if (!e || !podeEditar(e)) negar();
       const antes = !!e.realizado;
       if (antes === !!valor) return { id, realizado: antes };
+      const antesE = clone(e);
       e.realizado = !!valor; e.atualizado_por = atual; e.atualizado_em = new Date().toISOString();
+      conferencia(antesE, e);
       log('alterou', e, { realizado: [antes, !!valor] }, kind === 'atividade' ? 'atividade' : undefined);
       salvar();
       return { id, realizado: e.realizado };
@@ -625,6 +659,7 @@ function DemoAPI() {
         if (!podeEditar(old)) negar();
         if (old.dados?.execucao) campos.dados.execucao = old.dados.execucao; else delete campos.dados.execucao;
         const novo = { ...old, ...campos, atualizado_por: atual, atualizado_em: agora };
+        conferencia(old, novo);
         const det = {};
         ['situacao', 'nome', 'tipo', 'gerente', 'data_inicio', 'data_fim', 'valor_total', 'visibilidade'].forEach((k) => { if ((old[k] ?? null) !== (novo[k] ?? null)) det[k] = [old[k] ?? null, novo[k] ?? null]; });
         if (JSON.stringify(old.dados) !== JSON.stringify(novo.dados)) det.dados = true;
@@ -636,6 +671,7 @@ function DemoAPI() {
       }
       delete campos.dados.execucao;
       const novo = { id: uid(), numero: ++db.seqA, realizado: false, ...campos, criado_por: atual, criado_em: agora, atualizado_por: atual, atualizado_em: agora };
+      conferencia(null, novo);
       db.atividades.push(novo);
       log('criou', novo, {}, 'atividade');
       salvar();
@@ -652,12 +688,24 @@ function DemoAPI() {
       const a = db.atividades.find((x) => x.id === id);
       if (!a || !(podeEditar(a) || responsavelDemo(a))) negar();
       const antes = a.dados?.execucao?.conclusao || null;
+      const antesA = clone(a);
       a.dados = { ...(a.dados || {}), execucao: (conclusao || obs) ? { conclusao: conclusao || null, obs: obs || '', por: perfil(atual)?.nome, por_id: atual, em: new Date().toISOString() } : null };
       a.atualizado_por = atual; a.atualizado_em = new Date().toISOString();
+      conferencia(antesA, a);
       if (antes !== (conclusao || null)) log('alterou', a, { conclusao: [antes, conclusao || null] }, 'atividade');
       salvar();
       return clone(a.dados.execucao);
     },
+    async conferir(id, kind, situacao) {
+      if (!isAdmin()) negar();
+      const e = (kind === 'atividade' ? db.atividades : db.eventos).find((x) => x.id === id);
+      if (!e) negar();
+      const antes = e.situacao;
+      e.revisar = false;
+      if (situacao && situacao !== antes) { e.situacao = situacao; e.atualizado_por = atual; e.atualizado_em = new Date().toISOString(); log('alterou', e, { situacao: [antes, situacao] }, kind === 'atividade' ? 'atividade' : undefined); }
+      salvar();
+    },
+    async contarConferir() { return [...db.eventos, ...db.atividades].filter((x) => x.revisar && visivel(x)).length; },
     async listPerfis() { return clone(db.perfis).sort((a, b) => a.nome.localeCompare(b.nome)); },
     async updatePerfil(id, patch) {
       if (!isAdmin()) negar();
@@ -705,6 +753,34 @@ const souResponsavel = (a) => !!S.me && responsaveisDe(a).some((n) => normNome(n
 const podeExecutar = (a) => podeEditar(a) || souResponsavel(a);
 const execDe = (a) => (a?.dados?.execucao && typeof a.dados.execucao === 'object') ? a.dados.execucao : null;
 const sitDot = (s) => `<span class="sit-dot" style="background:${SIT[s]?.hex || '#999'}" title="${SIT[s]?.label || ''}" aria-label="${SIT[s]?.label || ''}"></span>`;
+const MOTIVOS = { criou: 'cadastrou', alterou: 'alterou', realizado: 'marcou como realizado', desmarcou: 'desmarcou o realizado', concluiu: 'registrou a conclusão', execucao: 'atualizou a execução' };
+const confTag = (r) => r?.revisar ? ` <span class="tag conf" title="${isAdmin() ? 'Um usuário mexeu aqui. Abra a aba Conferir para aprovar.' : 'Aguardando o administrador conferir e aprovar'}">${ic('hourglass')}${isAdmin() ? 'Conferir' : 'Aguardando conferência'}</span>` : '';
+let confChecado = 0;
+function atualizarConferir(forcar = false) {
+  if (!isAdmin() || (!forcar && $('#confBadge')?.dataset.ok && Date.now() - confChecado < 15000)) return;
+  confChecado = Date.now();
+  api.contarConferir?.().then((n) => { const b = $('#confBadge'); if (b) { b.textContent = n; b.dataset.ok = '1'; b.classList.toggle('hidden', !n); } }).catch(() => { /* coluna ainda não existe */ });
+}
+// Faixa no topo do evento/atividade: admin aprova ali mesmo; o dono vê que está aguardando
+function faixaConferir(r, kind) {
+  if (!r.revisar) return '';
+  const quem = esc(nomeDe(r.revisar_por || r.atualizado_por)), oque = MOTIVOS[r.revisar_motivo] || 'alterou';
+  if (!isAdmin()) return `<div class="info warn">${ic('hourglass')}<div><b>Aguardando conferência.</b> Só o administrador aprova; até lá ${kind === 'atividade' ? 'a atividade' : 'o evento'} fica como está.</div></div>`;
+  return `<div class="conf-faixa">${ic('hourglass')}<div class="grow"><b>Para conferir:</b> ${quem} ${oque} em ${fdt(r.revisar_em)}. O histórico, no fim da página, mostra o que mudou.</div>
+    <div class="conf-acts"><button class="btn btn-sm btn-ok" data-ap="aprovado">${ic('check')}Aprovar</button><button class="btn btn-sm" data-ap="reprovado">Não aprovar</button><button class="btn btn-sm btn-ghost" data-ap="" title="Tira da lista de conferência sem mudar a situação">Só conferido</button></div></div>`;
+}
+function ligarConferir(box, achar, depois) {
+  $$('[data-ap]', box).forEach((b) => b.addEventListener('click', async () => {
+    const [r, kind] = achar(b);
+    b.disabled = true;
+    try {
+      await api.conferir(r.id, kind, b.dataset.ap || null);
+      toast(b.dataset.ap === 'aprovado' ? `Nº ${pad(r.numero)} aprovado` : b.dataset.ap === 'reprovado' ? `Nº ${pad(r.numero)} marcado como não aprovado` : `Nº ${pad(r.numero)} conferido`);
+      atualizarConferir(true);
+      depois(r);
+    } catch (x) { b.disabled = false; toast(msgErro(x), 'err'); }
+  }));
+}
 const repIco = (r) => r?.dados?.repetir ? ` <span class="rep-ico" title="Repete todos os anos">${ic('repeat')}</span>` : '';
 
 /* Aplicativo instalável (ícone na área de trabalho / tela inicial) */
@@ -911,7 +987,7 @@ function renderShell() {
         <div class="grp">Acompanhamento</div>
         <a href="#/relatorios" data-r="relatorios">${ic('chart')}Relatórios</a>
         <a href="#/historico" data-r="historico">${ic('clock')}Histórico</a>
-        ${isAdmin() ? `<div class="grp">Administração</div><a href="#/usuarios" data-r="usuarios">${ic('users')}Usuários<span class="badge ${pend ? '' : 'hidden'}" id="pendBadge">${pend}</span></a>` : ''}
+        ${isAdmin() ? `<div class="grp">Administração</div><a href="#/conferir" data-r="conferir">${ic('checkc')}Conferir<span class="badge hidden" id="confBadge"></span></a><a href="#/usuarios" data-r="usuarios">${ic('users')}Usuários<span class="badge ${pend ? '' : 'hidden'}" id="pendBadge">${pend}</span></a>` : ''}
       </nav>
       ${appInstalado() ? '' : `<button type="button" class="nav-inst" id="btnInstalar">${ic('monitor')}<span>Instalar aplicativo<small>Ícone na área de trabalho ou no celular</small></span></button>`}
       <div class="me">
@@ -1000,12 +1076,14 @@ const ROTAS = [
   [/^#\/relatorios$/, 'relatorios', () => viewRelatorios()],
   [/^#\/historico$/, 'historico', () => viewHistorico()],
   [/^#\/usuarios$/, 'usuarios', () => viewUsuarios()],
+  [/^#\/conferir$/, 'conferir', () => viewConferir()],
 ];
 let ultimoHash = location.hash, ignorar = false;
 
 let ultimaChecagem = Date.now();
 async function route() {
   if (!S.me || !$('#view')) return;
+  atualizarConferir();
   if (!DEMO && Date.now() - ultimaChecagem > 5 * 60 * 1000) {
     ultimaChecagem = Date.now();
     try {
@@ -1053,7 +1131,8 @@ async function viewPainel() {
   try { S.atividades = await api.listAtividades(); } catch { /* opcional */ }
   const minhas = (S.atividades || []).filter((a) => souResponsavel(a) && !a.realizado);
   const conferir = isExecutor() ? [] : (S.atividades || []).filter((a) => podeEditar(a) && execDe(a)?.conclusao && !a.realizado);
-  const avisos = () => `${minhas.length ? `<div class="card exec-painel"><div class="card-h"><h3>${ic('megaphone')}Atividades para você executar</h3><span class="sp"></span><a class="btn btn-sm" href="#/atividades">Ver todas</a></div>
+  const paraConferir = isAdmin() ? [...evs, ...(S.atividades || [])].filter((r) => r.revisar).length : 0;
+  const avisos = () => `${paraConferir ? `<a class="conf-aviso" href="#/conferir">${ic('hourglass')}<div class="grow"><b>${paraConferir} ${paraConferir > 1 ? 'cadastros aguardam' : 'cadastro aguarda'} sua conferência</b><span>Usuários cadastraram, alteraram ou concluíram eventos e atividades. Clique para conferir e aprovar.</span></div>${ic('chevR')}</a>` : ''}${minhas.length ? `<div class="card exec-painel"><div class="card-h"><h3>${ic('megaphone')}Atividades para você executar</h3><span class="sp"></span><a class="btn btn-sm" href="#/atividades">Ver todas</a></div>
       <div class="list-ev">${minhas.slice(0, 8).map((a) => `<a href="#/atividades/${a.id}"><div class="datebox"><b>${(a.data_fim || '').slice(8, 10) || '—'}</b><span>${a.data_fim ? MESES[+a.data_fim.slice(5, 7) - 1] : 'prazo'}</span></div>
         <div class="grow"><div class="t">${esc(a.nome)}</div><div class="s">${a.data_fim ? 'Prazo de entrega ' + fdate(a.data_fim) : 'Sem prazo'}${execDe(a)?.conclusao ? ' · concluída em ' + fdate(execDe(a).conclusao) : ''}</div></div>${execDe(a)?.conclusao ? `<span class="exec-tag">${ic('checkc')}Enviada</span>` : pill(a.situacao)}</a>`).join('')}</div></div>` : ''}
     ${conferir.length ? `<div class="info warn">${ic('checkc')}<div><b>${conferir.length} atividade(s) com conclusão registrada</b> aguardando você conferir e marcar como realizada: ${conferir.slice(0, 5).map((a) => `<a href="#/atividades/${a.id}">Nº ${pad(a.numero)} ${esc(a.nome)}</a>`).join(', ')}.</div></div>` : ''}`;
@@ -1223,7 +1302,7 @@ async function viewEventos() {
       <thead><tr><th>Nº</th><th>Evento</th><th class="hide-md">Tipo</th><th>Período</th><th class="hide-md">Gerente</th><th class="right">Investimento</th><th></th><th class="c-done-h" title="Realizado: clique na bolinha quando o evento acontecer" aria-label="Realizado">${ic('checkc')}</th></tr></thead>
       <tbody>${lista.map((e) => `<tr class="click" data-id="${e.id}">
         <td data-hide class="c-num">${sitDot(e.situacao)}<span class="seq">${pad(e.numero)}</span></td>
-        <td class="c-main"><div class="ev-name">${esc(e.nome)}${repIco(e)}${e.visibilidade === 'privado' ? ` <span class="tag priv" title="Privado: só quem criou e os administradores veem">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(e)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="ev-sub">${ic('pin')}${esc(e.local || 'Local a definir')}</div></td>
+        <td class="c-main"><div class="ev-name">${esc(e.nome)}${repIco(e)}${confTag(e)}${e.visibilidade === 'privado' ? ` <span class="tag priv" title="Privado: só quem criou e os administradores veem">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(e)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(e)))}</div>` : ''}<div class="ev-sub">${ic('pin')}${esc(e.local || 'Local a definir')}</div></td>
         <td data-hide class="hide-md"><span class="tag">${esc(e.tipo)}</span></td>
         <td data-hide class="c-per">${periodo(e)}</td>
         <td data-hide class="hide-md">${esc(e.gerente || "—")}</td>
@@ -1357,7 +1436,7 @@ async function viewDetalhe(id) {
   const ce = d.contratoEvento || {}, mo = d.montadora || {};
   const maxC = Math.max(...Object.values(st), 1);
 
-  view().innerHTML = fichaHtml(e) + `<div class="no-print">
+  view().innerHTML = fichaHtml(e) + `<div class="no-print">${faixaConferir(e, 'evento')}
     ${pode ? '' : `<div class="info no-print">${ic('lock')}<div>Somente leitura. Este evento foi criado por <b>${esc(nomeDe(e.criado_por))}</b>; só essa pessoa ou um administrador pode alterá-lo.</div></div>`}
     <div class="print-only" style="margin-bottom:16px"><img src="assets/logo-dello.png" alt="Dello" style="width:90px"></div>
     <div class="card">
@@ -1449,6 +1528,7 @@ async function viewDetalhe(id) {
   $('#dImg').onclick = (x) => enviarFicha('imagem', x.currentTarget, e, 'evento');
   $('#dPdf').onclick = (x) => enviarFicha('pdf', x.currentTarget, e, 'evento');
   $('#dDel')?.addEventListener('click', () => excluirEvento(e, () => { location.hash = '#/eventos'; }));
+  ligarConferir($('.conf-faixa') || document.createElement('div'), () => [e, 'evento'], () => viewDetalhe(e.id));
   api.historico(e.id).then((hs) => { $('#dHist') && ($('#dHist').innerHTML = hs.length ? timeline(hs, false) : '<p class="muted small" style="margin:0">Sem registros.</p>'); })
     .catch(() => { $('#dHist') && ($('#dHist').innerHTML = '<p class="muted small">Não foi possível carregar o histórico.</p>'); });
 }
@@ -1699,7 +1779,9 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   const secDados = `<section class="card">
         ${secH(1, `Dados d${K.o} ${K.sing}`, 'Informações que aparecem no resumo e nos relatórios')}
         <div class="lbl">Situação</div>
-        <div class="seg" id="seg" style="margin-bottom:18px">${SIT_ORDEM.map((s) => `<label class="${SIT[s].cor} ${ev.situacao === s ? 'on' : ''}"><input type="radio" name="sit" value="${s}" ${ev.situacao === s ? 'checked' : ''}><span class="d"></span><span><b>${SIT[s].label}</b><small>${SIT[s].cx}</small></span></label>`).join('')}</div>
+        ${!isAdmin() ? `<div class="sit-fixa">${pill(novo ? 'analise' : ev.situacao)}<span>Só o administrador aprova. Ao salvar, ${K.o} ${K.sing} fica <b>Em análise</b> e vai para a conferência do administrador.</span>
+          <input type="radio" name="sit" value="analise" checked hidden></div>` : ''}
+        <div class="seg ${isAdmin() ? '' : 'hidden'}" id="seg" style="margin-bottom:18px">${SIT_ORDEM.map((s) => `<label class="${SIT[s].cor} ${ev.situacao === s ? 'on' : ''}"><input type="radio" name="sit" value="${s}" ${ev.situacao === s ? 'checked' : ''}><span class="d"></span><span><b>${SIT[s].label}</b><small>${SIT[s].cx}</small></span></label>`).join('')}</div>
         ${novo || ev.criado_por === S.me.id ? `<div class="lbl">Quem pode ver ${K.este}</div>
         <div class="seg seg2" id="segVis" style="margin-bottom:18px">
           <label class="vis ${ev.visibilidade !== 'privado' ? 'on' : ''}"><input type="radio" name="vis" value="todos" ${ev.visibilidade !== 'privado' ? 'checked' : ''}>${ic('users')}<span><b>Para todos</b><small>Todos os usuários aprovados veem</small></span></label>
@@ -2185,7 +2267,7 @@ async function viewAtividades() {
       <thead><tr><th>Nº</th><th>Atividade</th><th class="hide-md">Tipo</th><th>Início · Prazo</th><th>Responsável pela execução</th><th class="right">Valor</th><th></th><th class="c-done-h" title="Realizada: clique na bolinha quando a atividade for concluída" aria-label="Realizada">${ic('checkc')}</th></tr></thead>
       <tbody>${lista.map((a) => `<tr class="click ${souResponsavel(a) && !a.realizado ? 'minha' : ''}" data-id="${a.id}">
         <td data-hide class="c-num">${sitDot(a.situacao)}<span class="seq">${pad(a.numero)}</span></td>
-        <td class="c-main"><div class="ev-name">${esc(a.nome)}${repIco(a)}${a.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(a)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(a)))}</div>` : ''}${servTxt(a) ? `<div class="ev-sub">${ic('megaphone')}${esc(servTxt(a))}</div>` : ''}<div class="m-only">${execTag(a)}</div></td>
+        <td class="c-main"><div class="ev-name">${esc(a.nome)}${repIco(a)}${confTag(a)}${a.visibilidade === 'privado' ? ` <span class="tag priv">${ic('lock')}Privado</span>` : ''}</div>${clienteTexto(clienteDe(a)) ? `<div class="ev-sub">${ic('user')}${esc(clienteTexto(clienteDe(a)))}</div>` : ''}${servTxt(a) ? `<div class="ev-sub">${ic('megaphone')}${esc(servTxt(a))}</div>` : ''}<div class="m-only">${execTag(a)}</div></td>
         <td data-hide class="hide-md"><span class="tag">${esc(a.tipo)}</span></td>
         <td data-hide class="nowrap">${fdate(a.data_inicio) || '—'}${a.data_fim ? `<div class="small muted">Prazo: ${fdate(a.data_fim)}</div>` : ''}</td>
         <td data-hide class="c-resp">${responsaveisDe(a).length ? esc(responsaveisDe(a).join(', ')) : '<span class="muted">—</span>'}${execTag(a)}</td>
@@ -2265,7 +2347,7 @@ async function viewDetalheAtv(id) {
      <a class="btn" href="#/atividades/${a.id}/duplicar" title="Duplicar">${ic('copy')}<span class="lbl-long">Duplicar</span></a>
      ${pode ? `<button class="btn btn-danger" id="dDel" title="Excluir">${ic('trash')}</button><a class="btn btn-primary" href="#/atividades/${a.id}/editar">${ic('pencil')}Editar</a>` : ''}`);
   const pct = compraTexto(a.valor_total, d.compras);
-  view().innerHTML = fichaAtividade(a) + `<div class="no-print">
+  view().innerHTML = fichaAtividade(a) + `<div class="no-print">${faixaConferir(a, 'atividade')}
     ${pode ? '' : podeExec ? `<div class="info">${ic('info')}<div>Você é <b>responsável pela execução</b> desta atividade. Quando terminar, registre abaixo a <b>data de conclusão</b>, uma observação e as fotos do que foi feito.</div></div>`
       : `<div class="info">${ic('lock')}<div>Somente leitura. Esta atividade foi criada por <b>${esc(nomeDe(a.criado_por))}</b>; só essa pessoa ou um administrador pode alterá-la.</div></div>`}
     <div class="card">
@@ -2316,6 +2398,7 @@ async function viewDetalheAtv(id) {
   $('#dImg').onclick = (x) => enviarFicha('imagem', x.currentTarget, a, 'atividade');
   $('#dPdf').onclick = (x) => enviarFicha('pdf', x.currentTarget, a, 'atividade');
   $('#dDel')?.addEventListener('click', () => excluirEvento(a, () => { location.hash = '#/atividades'; }, 'atividade'));
+  ligarConferir($('.conf-faixa') || document.createElement('div'), () => [a, 'atividade'], () => viewDetalheAtv(a.id));
   carregarAnexos(a, pode);
   $('#xSalvar')?.addEventListener('click', async (x) => {
     const b = x.currentTarget, conc = $('#x-conc').value, obs = $('#x-obs').value.trim();
@@ -2333,6 +2416,39 @@ async function viewDetalheAtv(id) {
   }
   api.historico(a.id).then((hs) => { $('#dHist') && ($('#dHist').innerHTML = hs.length ? timeline(hs, false) : '<p class="muted small" style="margin:0">Sem registros.</p>'); })
     .catch(() => { $('#dHist') && ($('#dHist').innerHTML = '<p class="muted small">Não foi possível carregar o histórico.</p>'); });
+}
+
+/* ================================================================
+   Conferir: o que os usuários cadastraram, alteraram ou concluíram
+   ================================================================ */
+async function viewConferir() {
+  if (!isAdmin()) { location.hash = '#/painel'; return; }
+  setPage('Conferir', 'O que os usuários cadastraram, alteraram ou concluíram e aguarda a sua aprovação');
+  carregando();
+  const [evs, atvs] = await Promise.all([api.listEventos(), api.listAtividades()]);
+  S.eventos = evs; S.atividades = atvs;
+  const itens = [...evs.map((r) => ({ k: 'evento', r })), ...atvs.map((r) => ({ k: 'atividade', r }))]
+    .filter((x) => x.r.revisar).sort((a, b) => String(b.r.revisar_em || '').localeCompare(String(a.r.revisar_em || '')));
+  const linha = ({ k, r }) => {
+    const url = (k === 'evento' ? '#/eventos/' : '#/atividades/') + r.id, ex = k === 'atividade' ? execDe(r) : null;
+    return `<div class="conf-item" data-id="${r.id}" data-k="${k}">
+      <span class="conf-tipo ${k}">${ic(k === 'evento' ? 'calendar' : 'megaphone')}</span>
+      <div class="grow">
+        <a class="t" href="${url}">${k === 'evento' ? 'Evento' : 'Atividade'} Nº ${pad(r.numero)} — ${esc(r.nome)}</a>
+        <div class="s"><b>${esc(nomeDe(r.revisar_por || r.atualizado_por))}</b> ${MOTIVOS[r.revisar_motivo] || 'alterou'} · ${fdt(r.revisar_em || r.atualizado_em)}</div>
+        <div class="s">${sitDot(r.situacao)}${SIT[r.situacao]?.label || ''} · ${k === 'evento' ? periodo(r) : datasAtv(r)} · ${brl(r.valor_total)}${r.realizado ? ' · <b>realizado</b>' : ''}${ex?.conclusao ? ` · concluída em ${fdate(ex.conclusao)}` : ''}</div>
+      </div>
+      <div class="conf-acts"><a class="btn btn-sm" href="${url}">${ic('eye')}Ver</a>
+        <button class="btn btn-sm btn-ok" data-ap="aprovado">${ic('check')}Aprovar</button>
+        <button class="btn btn-sm" data-ap="reprovado">Não aprovar</button>
+        <button class="btn btn-sm btn-ghost" data-ap="" title="Tira da lista sem mudar a situação">Só conferido</button></div>
+    </div>`;
+  };
+  view().innerHTML = `<div class="info">${ic('info')}<div>Quando um usuário <b>cadastra</b> ou <b>altera</b> algo, fica <b>Em análise</b> e aparece aqui. Marcar como realizado e registrar a conclusão também aparecem.
+    Clique em <b>Ver</b> para abrir: o histórico, no fim da página, mostra exatamente o que mudou.</div></div>
+    <div class="card">${itens.length ? `<div class="card-h"><h3>${itens.length} para conferir</h3></div><div class="conf-lista">${itens.map(linha).join('')}</div>`
+      : vazio('checkc', 'Tudo conferido', 'Quando um usuário cadastrar, alterar ou concluir algo, aparece aqui para você aprovar.')}</div>`;
+  ligarConferir(view(), (b) => { const it = b.closest('.conf-item'); return [itens.find((x) => x.r.id === it.dataset.id).r, it.dataset.k]; }, () => viewConferir());
 }
 
 /* ================================================================
@@ -2904,10 +3020,11 @@ async function viewHistorico() {
 const PERMISSOES = [
   ['Ver eventos, atividades, calendário e relatórios', [1, 1, 1]],
   ['Ver cadastros marcados como privado por outras pessoas', [1, 0, 0]],
-  ['Cadastrar eventos e atividades', [1, 1, 0]],
+  ['Cadastrar eventos e atividades', [1, [1, 'entram sempre como Em análise'], 0]],
   ['Editar e excluir', [[1, 'de qualquer pessoa'], [0.5, 'só o que criou'], 0]],
   ['Marcar como realizado (bolinha)', [[1, 'qualquer um'], [0.5, 'só o que criou'], 0]],
   ['Registrar conclusão, observação e fotos da execução', [[1, 'qualquer atividade'], [0.5, 'nas que criou ou em que é responsável'], [0.5, 'só onde é o responsável']]],
+  ['Aprovar (mudar a situação) e conferir o que os outros fizeram', [1, 0, 0]],
   ['Aprovar acessos e mudar papéis', [1, 0, 0]],
 ];
 const PAPEL_INFO = {
