@@ -201,9 +201,10 @@ const temEntrega = (en) => !!en && ['destinatario', 'telefone', 'email', 'cep', 
 const comFrete = (en) => en?.modo === 'transportadora' || en?.modo === 'correio';
 function envioTexto(en = {}) {
   const frete = comFrete(en) && Number(en.frete) > 0 ? 'frete ' + brl(en.frete) : '';
-  if (en.modo === 'proprio') return 'Nosso carro' + (en.motorista ? ' — quem leva: ' + en.motorista : '');
-  if (en.modo === 'transportadora') return ['Transportadora' + (en.transportadora ? ' ' + en.transportadora : ''), en.coleta && 'coleta ' + fdate(en.coleta), frete].filter(Boolean).join(' · ');
-  if (en.modo === 'correio') return ['Correios', en.rastreio && 'rastreio ' + en.rastreio, frete].filter(Boolean).join(' · ');
+  const merc = en.modo && Number(en.mercadoria) > 0 ? 'mercadoria ' + brl(en.mercadoria) : '';
+  if (en.modo === 'proprio') return ['Nosso carro' + (en.motorista ? ' — quem leva: ' + en.motorista : ''), merc].filter(Boolean).join(' · ');
+  if (en.modo === 'transportadora') return ['Transportadora' + (en.transportadora ? ' ' + en.transportadora : ''), en.coleta && 'coleta ' + fdate(en.coleta), frete, merc].filter(Boolean).join(' · ');
+  if (en.modo === 'correio') return ['Correios', en.rastreio && 'rastreio ' + en.rastreio, frete, merc].filter(Boolean).join(' · ');
   return '';
 }
 const enderecoTexto = (en = {}) => [
@@ -1693,7 +1694,7 @@ function normalizarDados(d = {}) {
     hora_inicio: typeof d.hora_inicio === 'string' ? d.hora_inicio : '',
     hora_fim: typeof d.hora_fim === 'string' ? d.hora_fim : '',
     entrega: { destinatario: '', telefone: '', email: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '',
-      modo: '', motorista: '', transportadora: '', coleta: '', rastreio: '', frete: '', ...(d.entrega || {}) },
+      modo: '', motorista: '', transportadora: '', coleta: '', rastreio: '', frete: '', mercadoria: '', ...(d.entrega || {}) },
     servicos: fx(SERVICOS, d.servicos), gastos: fx(GASTOS, d.gastos),
     envolvidos: [...(d.envolvidos || [])], hospedagem: [...(d.hospedagem || [])],
     alimentacao: [...(d.alimentacao || [])], passagens: [...(d.passagens || [])],
@@ -1706,7 +1707,7 @@ function normalizarAtv(d = {}) {
     compras: comprasDe(d),
     contrato: { data: '', tipo: '', pagamento: '', valor: '', ...(d.contrato || {}) },
     entrega: { destinatario: '', telefone: '', email: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '',
-      modo: '', motorista: '', transportadora: '', coleta: '', rastreio: '', frete: '', ...(d.entrega || {}) },
+      modo: '', motorista: '', transportadora: '', coleta: '', rastreio: '', frete: '', mercadoria: '', ...(d.entrega || {}) },
     servicos: Array.isArray(d.servicos) ? d.servicos.filter((x) => x && typeof x === 'object') : [],
     observacoes: d.observacoes || '',
   };
@@ -1838,6 +1839,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
           <div class="field" data-envio="transportadora"><label for="f-en-coleta">Dia da coleta</label><input id="f-en-coleta" type="date" value="${esc(d.entrega?.coleta)}"></div>
           <div class="field span2" data-envio="correio"><label for="f-en-rastreio">Número de rastreio</label><input id="f-en-rastreio" value="${esc(d.entrega?.rastreio)}" maxlength="60" placeholder="Ex.: AB123456789BR" style="text-transform:uppercase"></div>
           <div class="field" data-envio="transportadora correio"><label for="f-en-frete">Valor do frete</label><div class="prefix"><span>R$</span><input id="f-en-frete" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.frete)}" placeholder="0,00"></div><div class="hint">Entra no total d${K.o} ${K.sing}</div></div>
+          <div class="field" data-envio="proprio transportadora correio"><label for="f-en-merc">Valor da mercadoria</label><div class="prefix"><span>R$</span><input id="f-en-merc" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.mercadoria)}" placeholder="0,00"></div><div class="hint">Valor do que está sendo enviado (não soma no total)</div></div>
         </div>
         <div class="grid g4">
           <div class="field"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega?.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
@@ -1994,6 +1996,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       transportadora: modo === 'transportadora' ? v('en-transp') : '', coleta: modo === 'transportadora' ? v('en-coleta') : '',
       rastreio: modo === 'correio' ? v('en-rastreio').toUpperCase() : '',
       frete: comFrete({ modo }) ? parseMoney(v('en-frete')) : '',
+      mercadoria: modo ? parseMoney(v('en-merc')) : '',
     };
     if (A) {
       return { ...comum, dados: { ...extra,
