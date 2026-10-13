@@ -26,7 +26,7 @@ const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'O
 const CATS = [
   ['contratos', 'Contratos'], ['servicos', 'Serviços contratados'], ['gastos', 'Gastos diversos'],
   ['hospedagem', 'Hospedagem'], ['alimentacao', 'Alimentação'], ['passagens', 'Passagens / condução'],
-  ['frete', 'Frete da entrega'],
+  ['frete', 'Frete da entrega'], ['mercadoria', 'Mercadoria enviada'],
 ];
 const ENVIOS = [['', 'A definir', 'info', 'Ainda não decidido'], ['proprio', 'Nosso carro', 'car', 'Levamos nós mesmos'],
   ['transportadora', 'Transportadora', 'truck', 'Coleta e frete'], ['correio', 'Correios', 'box', 'Rastreio e frete']];
@@ -199,6 +199,9 @@ const clienteTexto = (c = {}) => [c.codigo && 'Cód. ' + c.codigo, c.nome].filte
 const clienteDe = (e) => e?.dados?.cliente || {};
 const temEntrega = (en) => !!en && ['destinatario', 'telefone', 'email', 'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'data', 'horario', 'obs', 'modo'].some((k) => String(en[k] || '').trim());
 const comFrete = (en) => en?.modo === 'transportadora' || en?.modo === 'correio';
+// Valor da mercadoria enviada: entra no total quando há uma forma de envio escolhida
+const mercDe = (en) => ['proprio', 'transportadora', 'correio'].includes(en?.modo) ? Math.max(0, Number(en.mercadoria) || 0) : 0;
+const entregaValor = (en) => (comFrete(en) ? Math.max(0, Number(en.frete) || 0) : 0) + mercDe(en);
 function envioTexto(en = {}) {
   const frete = comFrete(en) && Number(en.frete) > 0 ? 'frete ' + brl(en.frete) : '';
   const merc = en.modo && Number(en.mercadoria) > 0 ? 'mercadoria ' + brl(en.mercadoria) : '';
@@ -267,9 +270,10 @@ function subtotais(d = {}) {
     servicos: s(d.servicos), gastos: s(d.gastos), hospedagem: s(d.hospedagem),
     alimentacao: s(d.alimentacao), passagens: s(d.passagens),
     frete: comFrete(d.entrega) ? pos(d.entrega.frete) : 0,
+    mercadoria: mercDe(d.entrega),
   };
 }
-const totalAtv = (d) => Math.round((Math.max(0, Number(d?.contrato?.valor) || 0) + (comFrete(d?.entrega) ? Math.max(0, Number(d.entrega.frete) || 0) : 0)) * 100) / 100;
+const totalAtv = (d) => Math.round((Math.max(0, Number(d?.contrato?.valor) || 0) + entregaValor(d?.entrega)) * 100) / 100;
 const totalDe = (d) => Math.round(soma(Object.values(subtotais(d))) * 100) / 100;
 
 // Garante o formato esperado dos dados vindos do banco (proteção contra registros malformados)
@@ -1400,7 +1404,7 @@ function fichaHtml(e) {
       <div class="f-tot"><span class="pill ${SIT[e.situacao]?.cor || 'gray'}">${SIT[e.situacao]?.label || ''}</span><small>Total do investimento</small><b>${brl(e.valor_total)}</b></div>
     </header>
     <div class="f-cols">
-      ${bloco('Endereço de entrega', entrega, st.frete ? brl(st.frete) : '')}
+      ${bloco('Endereço de entrega', entrega, entregaValor(en) ? brl(entregaValor(en)) : '')}
       ${bloco('Contratos', contratos, st.contratos ? brl(st.contratos) : '')}
       ${bloco('Serviços contratados', itens(d.servicos, true), st.servicos ? brl(st.servicos) : '')}
       ${bloco('Gastos diversos', itens(d.gastos, true), st.gastos ? brl(st.gastos) : '')}
@@ -1416,7 +1420,7 @@ function fichaHtml(e) {
 }
 
 // Cartão "Endereço de entrega" (evento e atividade)
-const cartaoEntrega = (en = {}) => `<div class="card full"><div class="card-h"><h3>Endereço de entrega</h3>${comFrete(en) && Number(en.frete) > 0 ? `<b class="num" style="margin-left:10px">${brl(en.frete)}</b>` : ''}<span class="sp"></span>
+const cartaoEntrega = (en = {}) => `<div class="card full"><div class="card-h"><h3>Endereço de entrega</h3>${entregaValor(en) > 0 ? `<b class="num" style="margin-left:10px">${brl(entregaValor(en))}</b>` : ''}<span class="sp"></span>
         ${temEntrega(en) && enderecoMapa(en) ? `<a class="btn btn-sm no-print" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(enderecoMapa(en))}" target="_blank" rel="noopener">${ic('pin')}Abrir no mapa</a>` : ''}
         ${temEntrega(en) ? `<button type="button" class="btn btn-sm no-print" id="enCopiar">${ic('copy')}Copiar</button>` : ''}</div>
         ${temEntrega(en) ? `<div class="grid g4">
@@ -1769,7 +1773,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   // clientes já usados (código → nome), em eventos e atividades
   const clientesAnt = [];
   [...S.eventos, ...S.atividades].forEach((e) => { const c = clienteDe(e); if (c.codigo && !clientesAnt.some((x) => x.codigo === c.codigo)) clientesAnt.push({ codigo: String(c.codigo), nome: String(c.nome || '') }); });
-  const cats = A ? [['contrato', 'Contrato'], ['frete', 'Frete da entrega']] : CATS;
+  const cats = A ? [['contrato', 'Contrato'], ['frete', 'Frete da entrega'], ['mercadoria', 'Mercadoria enviada']] : CATS;
   const voltar = novo ? '#/' + K.rota : `#/${K.rota}/${ev.id}`;
 
   setPage(novo ? (duplicar ? `Duplicar ${K.sing}` : K.nova) : `Editar ${K.sing} Nº ${pad(ev.numero)}`,
@@ -1839,7 +1843,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
           <div class="field" data-envio="transportadora"><label for="f-en-coleta">Dia da coleta</label><input id="f-en-coleta" type="date" value="${esc(d.entrega?.coleta)}"></div>
           <div class="field span2" data-envio="correio"><label for="f-en-rastreio">Número de rastreio</label><input id="f-en-rastreio" value="${esc(d.entrega?.rastreio)}" maxlength="60" placeholder="Ex.: AB123456789BR" style="text-transform:uppercase"></div>
           <div class="field" data-envio="transportadora correio"><label for="f-en-frete">Valor do frete</label><div class="prefix"><span>R$</span><input id="f-en-frete" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.frete)}" placeholder="0,00"></div><div class="hint">Entra no total d${K.o} ${K.sing}</div></div>
-          <div class="field" data-envio="proprio transportadora correio"><label for="f-en-merc">Valor da mercadoria</label><div class="prefix"><span>R$</span><input id="f-en-merc" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.mercadoria)}" placeholder="0,00"></div><div class="hint">Valor do que está sendo enviado (não soma no total)</div></div>
+          <div class="field" data-envio="proprio transportadora correio"><label for="f-en-merc">Valor da mercadoria</label><div class="prefix"><span>R$</span><input id="f-en-merc" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.mercadoria)}" placeholder="0,00"></div><div class="hint">Entra no total d${K.o} ${K.sing}</div></div>
         </div>
         <div class="grid g4">
           <div class="field"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega?.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
@@ -2017,7 +2021,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
 
   const atualizar = () => {
     const f = ler();
-    const st = A ? { contrato: Math.max(0, Number(f.dados.contrato.valor) || 0), frete: comFrete(f.dados.entrega) ? Math.max(0, Number(f.dados.entrega.frete) || 0) : 0 } : subtotais(f.dados);
+    const st = A ? { contrato: Math.max(0, Number(f.dados.contrato.valor) || 0), frete: comFrete(f.dados.entrega) ? Math.max(0, Number(f.dados.entrega.frete) || 0) : 0, mercadoria: mercDe(f.dados.entrega) } : subtotais(f.dados);
     const tot = A ? totalAtv(f.dados) : totalDe(f.dados);
     $('#rs-nome').textContent = f.nome || `${K.Sing} sem nome`;
     $('#rs-sit').innerHTML = pill(f.situacao) + ` <span class="tag">${esc(f.tipo)}</span>`;
@@ -2346,7 +2350,7 @@ function fichaAtividade(a) {
       ${bloco('Contrato', contrato, ct.valor ? brl(ct.valor) : '')}
       ${bloco('Compras do cliente', compras)}
       ${bloco('Serviços a realizar', serv)}
-      ${bloco('Endereço de entrega', entregaFicha(d.entrega), comFrete(d.entrega) && Number(d.entrega.frete) > 0 ? brl(d.entrega.frete) : '')}
+      ${bloco('Endereço de entrega', entregaFicha(d.entrega), entregaValor(d.entrega) ? brl(entregaValor(d.entrega)) : '')}
       ${bloco('Observações', d.observacoes ? `<p class="f-obs">${esc(d.observacoes)}</p>` : '')}
     </div>
     <footer class="f-rod"><span id="fichaAnx"></span><span>Cadastrado por ${esc(nomeDe(a.criado_por))} em ${fdia(a.criado_em)} · Impresso em ${fdt(new Date())} por ${esc(S.me?.nome || '')}</span></footer>
@@ -2968,22 +2972,22 @@ function baixarCsv(cab, linhas, nome) {
 function exportarCsvAtv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
   baixarCsv(['Nº', 'Situação', 'Realizada', 'Tipo', 'Atividade', 'Cód. cliente', 'Cliente', 'Solicitante', 'Início', 'Prazo de entrega', 'Serviços', 'Responsável pela execução',
-    'Data de conclusão', 'Obs. da execução', 'Tipo do contrato', 'Forma de pagamento', 'Contrato', 'Frete', 'Valor', 'Endereço de entrega', 'Envio', 'Cadastrado por'],
+    'Data de conclusão', 'Obs. da execução', 'Tipo do contrato', 'Forma de pagamento', 'Contrato', 'Frete', 'Mercadoria enviada', 'Valor', 'Endereço de entrega', 'Envio', 'Cadastrado por'],
   lista.map((a) => { const ct = a.dados?.contrato || {}, ex = execDe(a) || {};
     return [pad(a.numero), SIT[a.situacao]?.label, a.realizado ? 'Sim' : 'Não', a.tipo, a.nome, clienteDe(a).codigo || '', clienteDe(a).nome || '', a.gerente, fdate(a.data_inicio), fdate(a.data_fim),
       (a.dados?.servicos || []).map((x) => [x.tipo, x.formato].filter(Boolean).join(' — ')).join(' | '), responsaveisDe(a).join(', '),
-      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(ct.valor), n(comFrete(a.dados?.entrega) ? a.dados.entrega.frete : 0), n(a.valor_total),
+      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(ct.valor), n(comFrete(a.dados?.entrega) ? a.dados.entrega.frete : 0), n(mercDe(a.dados?.entrega)), n(a.valor_total),
       enderecoTexto(a.dados?.entrega || {}), envioTexto(a.dados?.entrega || {}), nomeDe(a.criado_por)]; }), 'atividades-dello');
 }
 
 function exportarCsv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
   const q = (s) => { let t = String(s ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
-  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Cód. cliente', 'Cliente', 'Local', 'Gerente', 'Início', 'Término', 'Horário', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Frete', 'Total', 'Realizado', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega', 'Envio', 'Compras ano 1', 'Compras ano 2', 'Compras ano 3', '% das compras do último ano', '% da média de compras'];
+  const cab = ['Nº', 'Situação', 'Tipo', 'Evento', 'Cód. cliente', 'Cliente', 'Local', 'Gerente', 'Início', 'Término', 'Horário', 'Contratos', 'Serviços', 'Gastos diversos', 'Hospedagem', 'Alimentação', 'Passagens', 'Frete', 'Mercadoria enviada', 'Total', 'Realizado', 'Cadastrado por', 'Endereço de entrega', 'Quem recebe', 'Data de entrega', 'Envio', 'Compras ano 1', 'Compras ano 2', 'Compras ano 3', '% das compras do último ano', '% da média de compras'];
   const linhas = lista.map((e) => {
     const st = subtotais(e.dados);
     return [pad(e.numero), SIT[e.situacao]?.label, e.tipo, e.nome, clienteDe(e).codigo || '', clienteDe(e).nome || '', e.local, e.gerente, fdate(e.data_inicio), fdate(e.data_fim), horarioTexto(e),
-      n(st.contratos), n(st.servicos), n(st.gastos), n(st.hospedagem), n(st.alimentacao), n(st.passagens), n(st.frete), n(e.valor_total), e.realizado ? 'Sim' : 'Não', nomeDe(e.criado_por),
+      n(st.contratos), n(st.servicos), n(st.gastos), n(st.hospedagem), n(st.alimentacao), n(st.passagens), n(st.frete), n(st.mercadoria), n(e.valor_total), e.realizado ? 'Sim' : 'Não', nomeDe(e.criado_por),
       enderecoTexto(e.dados?.entrega || {}), e.dados?.entrega?.destinatario || '', fdate(e.dados?.entrega?.data), envioTexto(e.dados?.entrega || {}),
       ...comprasDe(e.dados).map((c) => Number(c.valor) > 0 ? `${c.ano}: ${n(c.valor)}` : ''),
       ...(() => { const x = analiseCompra(e.valor_total, e.dados?.compras); return x ? [n(x.pctUlt) + '%', n(x.pctMedia) + '%'] : ['', '']; })()].map(q).join(';');
