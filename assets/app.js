@@ -268,6 +268,7 @@ function subtotais(d = {}) {
     frete: comFrete(d.entrega) ? pos(d.entrega.frete) : 0,
   };
 }
+const totalAtv = (d) => Math.round((Math.max(0, Number(d?.contrato?.valor) || 0) + (comFrete(d?.entrega) ? Math.max(0, Number(d.entrega.frete) || 0) : 0)) * 100) / 100;
 const totalDe = (d) => Math.round(soma(Object.values(subtotais(d))) * 100) / 100;
 
 // Garante o formato esperado dos dados vindos do banco (proteção contra registros malformados)
@@ -276,7 +277,7 @@ function sanearAtv(a) {
   const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x)) ? x : {};
   const d = obj(a.dados);
   a.dados = {
-    ...d, cliente: obj(d.cliente), contrato: obj(d.contrato), compras: comprasDe(d),
+    ...d, cliente: obj(d.cliente), contrato: obj(d.contrato), entrega: obj(d.entrega), compras: comprasDe(d),
     servicos: Array.isArray(d.servicos) ? d.servicos.filter((i) => i && typeof i === 'object' && !Array.isArray(i)) : [],
     observacoes: typeof d.observacoes === 'string' ? d.observacoes : '',
   };
@@ -436,7 +437,7 @@ function SupaAPI() {
     async saveAtividade(a) {
       const row = {
         situacao: a.situacao, visibilidade: a.visibilidade === 'privado' ? 'privado' : 'todos', tipo: a.tipo, nome: a.nome, gerente: a.gerente || '',
-        data_inicio: a.data_inicio || null, data_fim: a.data_fim || null, dados: a.dados, valor_total: Number(a.dados?.contrato?.valor) || 0,
+        data_inicio: a.data_inicio || null, data_fim: a.data_fim || null, dados: a.dados, valor_total: totalAtv(a.dados),
       };
       if (a.id) {
         const r = chk(await sb.from('atividades').update(row).eq('id', a.id).select());
@@ -651,7 +652,7 @@ function DemoAPI() {
     async saveAtividade(a) {
       const agora = new Date().toISOString(), dados = clone(a.dados);
       const campos = { situacao: a.situacao, visibilidade: a.visibilidade === 'privado' ? 'privado' : 'todos', tipo: a.tipo, nome: a.nome, gerente: a.gerente,
-        data_inicio: a.data_inicio || null, data_fim: a.data_fim || null, dados, valor_total: Math.max(0, Number(dados?.contrato?.valor) || 0) };
+        data_inicio: a.data_inicio || null, data_fim: a.data_fim || null, dados, valor_total: totalAtv(dados) };
       if (a.id) {
         const i = db.atividades.findIndex((x) => x.id === a.id);
         if (i < 0) throw new Error('Atividade não encontrada.');
@@ -1413,6 +1414,18 @@ function fichaHtml(e) {
   </div>`;
 }
 
+// Cartão "Endereço de entrega" (evento e atividade)
+const cartaoEntrega = (en = {}) => `<div class="card full"><div class="card-h"><h3>Endereço de entrega</h3>${comFrete(en) && Number(en.frete) > 0 ? `<b class="num" style="margin-left:10px">${brl(en.frete)}</b>` : ''}<span class="sp"></span>
+        ${temEntrega(en) && enderecoMapa(en) ? `<a class="btn btn-sm no-print" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(enderecoMapa(en))}" target="_blank" rel="noopener">${ic('pin')}Abrir no mapa</a>` : ''}
+        ${temEntrega(en) ? `<button type="button" class="btn btn-sm no-print" id="enCopiar">${ic('copy')}Copiar</button>` : ''}</div>
+        ${temEntrega(en) ? `<div class="grid g4">
+          <div class="span2"><div class="lbl">Endereço</div>${esc(enderecoTexto(en)) || '—'}</div>
+          <div><div class="lbl">Quem recebe</div>${esc(en.destinatario || '—')}${en.telefone ? `<div class="small muted">${esc(en.telefone)}</div>` : ''}${en.email ? `<div class="small"><a href="mailto:${encodeURIComponent(en.email)}">${esc(en.email)}</a></div>` : ''}</div>
+          <div><div class="lbl">Entrega</div>${fdate(en.data) || '—'}${en.horario ? `<div class="small muted">${esc(en.horario)}</div>` : ''}</div>
+          ${envioTexto(en) ? `<div class="span-all envio-det">${ic(ENVIOS.find((x) => x[0] === en.modo)?.[2] || 'truck')}<div><div class="lbl">Como vai ser enviado</div><b>${esc(envioTexto(en))}</b></div></div>` : ''}
+          ${en.obs ? `<div class="span-all"><div class="lbl">Observações</div>${esc(en.obs)}</div>` : ''}
+        </div>` : '<p class="muted small" style="margin:0">Nenhum endereço de entrega informado.</p>'}</div>`;
+
 async function viewDetalhe(id) {
   carregando();
   const e = await api.getEvento(id);
@@ -1458,16 +1471,7 @@ async function viewDetalhe(id) {
     <div class="det-grid">
       <div class="card"><div class="card-h"><h3>Composição do investimento</h3></div>
         <div class="hbars">${CATS.map(([k, l]) => `<div class="hbar"><div class="top"><b>${l}</b><span>${brl(st[k])}</span></div><div class="track"><div class="fill" style="width:${(st[k] / maxC) * 100}%"></div></div></div>`).join('')}</div></div>
-      <div class="card full"><div class="card-h"><h3>Endereço de entrega</h3>${st.frete ? `<b class="num" style="margin-left:10px">${brl(st.frete)}</b>` : ''}<span class="sp"></span>
-        ${temEntrega(d.entrega) && enderecoMapa(d.entrega) ? `<a class="btn btn-sm no-print" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(enderecoMapa(d.entrega))}" target="_blank" rel="noopener">${ic('pin')}Abrir no mapa</a>` : ''}
-        ${temEntrega(d.entrega) ? `<button type="button" class="btn btn-sm no-print" id="enCopiar">${ic('copy')}Copiar</button>` : ''}</div>
-        ${temEntrega(d.entrega) ? `<div class="grid g4">
-          <div class="span2"><div class="lbl">Endereço</div>${esc(enderecoTexto(d.entrega)) || '—'}</div>
-          <div><div class="lbl">Quem recebe</div>${esc(d.entrega.destinatario || '—')}${d.entrega.telefone ? `<div class="small muted">${esc(d.entrega.telefone)}</div>` : ''}${d.entrega.email ? `<div class="small"><a href="mailto:${encodeURIComponent(d.entrega.email)}">${esc(d.entrega.email)}</a></div>` : ''}</div>
-          <div><div class="lbl">Entrega</div>${fdate(d.entrega.data) || '—'}${d.entrega.horario ? `<div class="small muted">${esc(d.entrega.horario)}</div>` : ''}</div>
-          ${envioTexto(d.entrega) ? `<div class="span-all envio-det">${ic(ENVIOS.find((x) => x[0] === d.entrega.modo)?.[2] || 'truck')}<div><div class="lbl">Como vai ser enviado</div><b>${esc(envioTexto(d.entrega))}</b></div></div>` : ''}
-          ${d.entrega.obs ? `<div class="span-all"><div class="lbl">Observações</div>${esc(d.entrega.obs)}</div>` : ''}
-        </div>` : '<p class="muted small" style="margin:0">Nenhum endereço de entrega informado.</p>'}</div>
+      ${cartaoEntrega(d.entrega)}
       <div class="card"><div class="card-h"><h3>Contratos</h3><span class="sp"></span><b class="num">${brl(st.contratos)}</b></div>
         <div class="sub-h" style="margin-top:0">Contrato sobre o evento</div>
         <div class="grid g3"><div><div class="lbl">Aprovação</div>${fdate(ce.data) || '—'}</div><div><div class="lbl">Área</div>${ce.area ? esc(String(ce.area).replace('.', ',')) + ' m²' : '—'}</div><div><div class="lbl">Valor</div>${brl(ce.valor)}</div></div>
@@ -1701,6 +1705,8 @@ function normalizarAtv(d = {}) {
     cliente: { codigo: '', nome: '', ...(d.cliente || {}) },
     compras: comprasDe(d),
     contrato: { data: '', tipo: '', pagamento: '', valor: '', ...(d.contrato || {}) },
+    entrega: { destinatario: '', telefone: '', email: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '',
+      modo: '', motorista: '', transportadora: '', coleta: '', rastreio: '', frete: '', ...(d.entrega || {}) },
     servicos: Array.isArray(d.servicos) ? d.servicos.filter((x) => x && typeof x === 'object') : [],
     observacoes: d.observacoes || '',
   };
@@ -1762,7 +1768,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   // clientes já usados (código → nome), em eventos e atividades
   const clientesAnt = [];
   [...S.eventos, ...S.atividades].forEach((e) => { const c = clienteDe(e); if (c.codigo && !clientesAnt.some((x) => x.codigo === c.codigo)) clientesAnt.push({ codigo: String(c.codigo), nome: String(c.nome || '') }); });
-  const cats = A ? [['contrato', 'Contrato']] : CATS;
+  const cats = A ? [['contrato', 'Contrato'], ['frete', 'Frete da entrega']] : CATS;
   const voltar = novo ? '#/' + K.rota : `#/${K.rota}/${ev.id}`;
 
   setPage(novo ? (duplicar ? `Duplicar ${K.sing}` : K.nova) : `Editar ${K.sing} Nº ${pad(ev.numero)}`,
@@ -1799,7 +1805,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
           ${comprasHtml(d.compras)}
           <div class="field"><label for="f-inicio">Data de início</label><input id="f-inicio" type="date" value="${esc(ev.data_inicio || '')}"></div>
           <div class="field"><label for="f-fim">${A ? 'Prazo de entrega' : 'Data de término'}</label><input id="f-fim" type="date" value="${esc(ev.data_fim || '')}"></div>
-          <div class="field"><label for="f-gerente">Gerente responsável</label><input id="f-gerente" list="dl-ger" value="${esc(ev.gerente)}" placeholder="Nome do gerente" maxlength="150"></div>
+          <div class="field"><label for="f-gerente">${A ? 'Solicitante' : 'Gerente responsável'}</label><input id="f-gerente" list="dl-ger" value="${esc(ev.gerente)}" placeholder="${A ? 'Quem pediu a atividade' : 'Nome do gerente'}" maxlength="150"></div>
           ${A ? '' : `<div class="span-all local-hora">
             <div class="field"><label for="f-local">Local do evento</label><input id="f-local" list="dl-loc" value="${esc(ev.local)}" placeholder="Pavilhão, cidade/UF" maxlength="300"></div>
             <div class="field"><label for="f-hini">Horário de início</label><input id="f-hini" type="time" value="${esc(hora(d.hora_inicio))}"></div>
@@ -1821,9 +1827,9 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
         <div class="kbd-hint">${ic('info')}<span>Os arquivos escolhidos são enviados quando você clicar em <b>Salvar</b>. No computador, também dá para arrastar para cá.</span></div>
       </section>`;
 
-  const secoesEvento = `
+  const secEntrega = (n) => `
       <section class="card">
-        ${secH(2, 'Endereço de entrega', 'Para onde enviar produtos, amostras e materiais do evento', 'frete')}
+        ${secH(n, 'Endereço de entrega', `Para onde enviar produtos, amostras e materiais d${K.o} ${K.sing}`, 'frete')}
         <div class="lbl">Como vai ser enviado</div>
         <div class="seg seg4" id="segEnvio">${ENVIOS.map(([m, l, i, sub]) => `<label class="vis ${(d.entrega?.modo || '') === m ? 'on' : ''}"><input type="radio" name="envio" value="${m}" ${(d.entrega?.modo || '') === m ? 'checked' : ''}>${ic(i)}<span><b>${l}</b><small>${sub}</small></span></label>`).join('')}</div>
         <div class="grid g4 envio-campos" id="envioCampos">
@@ -1831,7 +1837,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
           <div class="field span2" data-envio="transportadora"><label for="f-en-transp">Nome da transportadora</label><input id="f-en-transp" value="${esc(d.entrega?.transportadora)}" maxlength="120" placeholder="Ex.: Braspress, Jadlog…"></div>
           <div class="field" data-envio="transportadora"><label for="f-en-coleta">Dia da coleta</label><input id="f-en-coleta" type="date" value="${esc(d.entrega?.coleta)}"></div>
           <div class="field span2" data-envio="correio"><label for="f-en-rastreio">Número de rastreio</label><input id="f-en-rastreio" value="${esc(d.entrega?.rastreio)}" maxlength="60" placeholder="Ex.: AB123456789BR" style="text-transform:uppercase"></div>
-          <div class="field" data-envio="transportadora correio"><label for="f-en-frete">Valor do frete</label><div class="prefix"><span>R$</span><input id="f-en-frete" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.frete)}" placeholder="0,00"></div><div class="hint">Entra no total do evento</div></div>
+          <div class="field" data-envio="transportadora correio"><label for="f-en-frete">Valor do frete</label><div class="prefix"><span>R$</span><input id="f-en-frete" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.frete)}" placeholder="0,00"></div><div class="hint">Entra no total d${K.o} ${K.sing}</div></div>
         </div>
         <div class="grid g4">
           <div class="field"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega?.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
@@ -1848,7 +1854,10 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
           <div class="field"><label for="f-en-hora">Horário de recebimento</label><input id="f-en-hora" value="${esc(d.entrega?.horario)}" maxlength="60" placeholder="Ex.: 8h às 17h"></div>
           <div class="field span3"><label for="f-en-obs">Observações da entrega</label><input id="f-en-obs" value="${esc(d.entrega?.obs)}" maxlength="300" placeholder="Doca, portão de carga, agendamento, nota fiscal…"></div>
         </div>
-      </section>
+      </section>`;
+
+  const secoesEvento = `
+      ${secEntrega(2)}
 
       <section class="card">
         ${secH(3, 'Contratos', 'Contrato do espaço e da montadora do estande', 'contratos')}
@@ -1915,8 +1924,9 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
         ${secH(3, 'Serviços a realizar', 'Uma linha por serviço: anúncio, folder, panfleto, catálogo, vídeo ou outro')}
         ${reps('servicosAtv', d.servicos)}${hintEnter}
       </section>
-      ${secObs(4)}
-      ${secArq(5)}`;
+      ${secEntrega(4)}
+      ${secObs(5)}
+      ${secArq(6)}`;
 
   view().innerHTML = `<form id="frm" novalidate autocomplete="off"><div class="form-layout">
     <div class="form-main">
@@ -1975,27 +1985,27 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       proximo_id: duplicar ? undefined : ev.dados?.proximo_id, origem_id: duplicar ? undefined : ev.dados?.origem_id };
     const cliente = { codigo: v('cli-cod'), nome: v('cli-nome') };
     const compras = [0, 1, 2].map((i) => ({ ano: Number($('#f-cp-' + i).dataset.ano), valor: parseMoney($('#f-cp-' + i).value) }));
+    const modo = $('input[name=envio]:checked', frm)?.value || '';
+    const entrega = {
+      destinatario: v('en-dest'), telefone: v('en-tel'), email: v('en-email').toLowerCase(), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
+      complemento: v('en-comp'), bairro: v('en-bairro'), cidade: v('en-cidade'), uf: v('en-uf'),
+      data: v('en-data'), horario: v('en-hora'), obs: v('en-obs'), modo,
+      motorista: modo === 'proprio' ? v('en-mot') : '',
+      transportadora: modo === 'transportadora' ? v('en-transp') : '', coleta: modo === 'transportadora' ? v('en-coleta') : '',
+      rastreio: modo === 'correio' ? v('en-rastreio').toUpperCase() : '',
+      frete: comFrete({ modo }) ? parseMoney(v('en-frete')) : '',
+    };
     if (A) {
       return { ...comum, dados: { ...extra,
-        cliente, compras, contrato: { data: v('ct-data'), tipo: v('ct-tipo'), pagamento: v('ct-pag'), valor: parseMoney(v('ct-valor')) },
+        cliente, compras, entrega, contrato: { data: v('ct-data'), tipo: v('ct-tipo'), pagamento: v('ct-pag'), valor: parseMoney(v('ct-valor')) },
         servicos: linhas('servicosAtv').map((x) => ({ ...x, email: (x.email || '').toLowerCase() })), observacoes: $('#f-obs').value.trim(),
       } };
     }
     const area = v('ce-area');
-    const modo = $('input[name=envio]:checked', frm)?.value || '';
     return { ...comum, local: v('local'), dados: { ...extra,
       contratoEvento: { data: v('ce-data'), area: area ? parseMoney(area) : '', valor: parseMoney(v('ce-valor')) },
       montadora: { data: v('mo-data'), nome: v('mo-nome'), valor: parseMoney(v('mo-valor')) },
-      cliente, compras, hora_inicio: v('hini'), hora_fim: v('hfim'),
-      entrega: {
-        destinatario: v('en-dest'), telefone: v('en-tel'), email: v('en-email').toLowerCase(), cep: v('en-cep'), rua: v('en-rua'), numero: v('en-num'),
-        complemento: v('en-comp'), bairro: v('en-bairro'), cidade: v('en-cidade'), uf: v('en-uf'),
-        data: v('en-data'), horario: v('en-hora'), obs: v('en-obs'), modo,
-        motorista: modo === 'proprio' ? v('en-mot') : '',
-        transportadora: modo === 'transportadora' ? v('en-transp') : '', coleta: modo === 'transportadora' ? v('en-coleta') : '',
-        rastreio: modo === 'correio' ? v('en-rastreio').toUpperCase() : '',
-        frete: comFrete({ modo }) ? parseMoney(v('en-frete')) : '',
-      },
+      cliente, compras, hora_inicio: v('hini'), hora_fim: v('hfim'), entrega,
       servicos: itens('servicos'), gastos: itens('gastos'),
       envolvidos: linhas('envolvidos').map((r) => r.nome), hospedagem: linhas('hospedagem'),
       alimentacao: linhas('alimentacao'), passagens: linhas('passagens'), observacoes: $('#f-obs').value.trim(),
@@ -2004,8 +2014,8 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
 
   const atualizar = () => {
     const f = ler();
-    const st = A ? { contrato: Math.max(0, Number(f.dados.contrato.valor) || 0) } : subtotais(f.dados);
-    const tot = A ? st.contrato : totalDe(f.dados);
+    const st = A ? { contrato: Math.max(0, Number(f.dados.contrato.valor) || 0), frete: comFrete(f.dados.entrega) ? Math.max(0, Number(f.dados.entrega.frete) || 0) : 0 } : subtotais(f.dados);
+    const tot = A ? totalAtv(f.dados) : totalDe(f.dados);
     $('#rs-nome').textContent = f.nome || `${K.Sing} sem nome`;
     $('#rs-sit').innerHTML = pill(f.situacao) + ` <span class="tag">${esc(f.tipo)}</span>`;
     cats.forEach(([k]) => {
@@ -2025,7 +2035,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       tr.classList.toggle('has', !!(q || u));
     });
     $$('#seg label, #segVis label, #segEnvio label').forEach((l) => l.classList.toggle('on', $('input', l).checked));
-    if (!A) {
+    {
       const modo = f.dados.entrega.modo;
       $$('[data-envio]').forEach((el) => el.classList.toggle('hidden', !el.dataset.envio.split(' ').includes(modo)));
       $('#envioCampos').classList.toggle('hidden', !modo);
@@ -2191,12 +2201,13 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       }
     }
     const dd = f.dados;
+    if (dd.entrega?.email && !emailOk(dd.entrega.email)) return erro('en-email', 'E-mail do cliente inválido.');
     if (A) {
       dd.servicos = dd.servicos.filter((x) => x.tipo || x.formato || x.responsavel || x.email);
       const ruim = dd.servicos.find((x) => x.email && !emailOk(x.email));
       if (ruim) { toast(`E-mail para envio inválido: ${ruim.email}`, 'err'); return; }
     } else {
-      if (dd.entrega.email && !emailOk(dd.entrega.email)) return erro('en-email', 'E-mail do cliente inválido.');
+
       if (dd.hospedagem.some((h) => h.chegada && h.saida && h.saida < h.chegada)) { toast('Há hospedagem com saída antes da chegada.', 'err'); return; }
       const temAlgo = (o) => Object.entries(o).some(([k, val]) => k !== 'meio' && val !== '' && val !== 0 && val != null);
       dd.servicos = dd.servicos.filter((x) => x.qt || x.unit || x.obs || (!x.fixo && x.nome)).map((x) => ({ ...x, nome: x.nome || 'Outro serviço' }));
@@ -2243,7 +2254,7 @@ async function viewAtividades() {
   const F = S.filtrosAtv;
   view().innerHTML = `<div class="card">
     <div class="filters">
-      <div class="search input-icon">${ic('search')}<input id="aq" type="search" placeholder="Buscar por atividade, cliente, gerente, responsável ou número" value="${esc(F.q)}"></div>
+      <div class="search input-icon">${ic('search')}<input id="aq" type="search" placeholder="Buscar por atividade, cliente, solicitante, responsável ou número" value="${esc(F.q)}"></div>
       <select id="atipo" aria-label="Tipo"><option value="">Todos os tipos</option>${tiposDe(lst, TIPOS_ATV).map((t) => `<option ${F.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
       <label class="toggle"><input type="checkbox" id="ameus" ${F.meus ? 'checked' : ''}><span class="sw"></span>Só as minhas</label>
     </div>
@@ -2299,10 +2310,18 @@ const contratoTxt = (ct) => [ct.tipo, ct.pagamento && 'Pagamento: ' + ct.pagamen
 
 function textoAtividade(a) {
   const d = a.dados || {}, ct = d.contrato || {};
-  return `*Atividade Nº ${pad(a.numero)} — ${a.nome}*\n${clienteTexto(clienteDe(a)) ? 'Cliente: ' + clienteTexto(clienteDe(a)) + '\n' : ''}${SIT[a.situacao]?.label} · ${a.tipo}\n${datasAtv(a)}\nGerente: ${a.gerente || '—'}\n` +
+  return `*Atividade Nº ${pad(a.numero)} — ${a.nome}*\n${clienteTexto(clienteDe(a)) ? 'Cliente: ' + clienteTexto(clienteDe(a)) + '\n' : ''}${SIT[a.situacao]?.label} · ${a.tipo}\n${datasAtv(a)}\nSolicitante: ${a.gerente || '—'}\n` +
     ((ct.valor || ct.tipo || ct.data || ct.pagamento) ? `Contrato: ${contratoTxt(ct)} — ${brl(ct.valor)}\n` : '') +
+    (temEntrega(d.entrega) ? `Entrega: ${entregaTexto(d.entrega)}\n` : '') +
     (d.servicos || []).map((x) => `• ${[x.tipo, x.formato].filter(Boolean).join(' — ')}${x.responsavel ? ' · Resp.: ' + x.responsavel : ''}${x.email ? ' · Envio: ' + x.email : ''}`).join('\n') +
     (compraTexto(a.valor_total, d.compras) ? `\nRepresenta ${compraTexto(a.valor_total, d.compras)}` : '') + `\n*Valor: ${brl(a.valor_total)}*`;
+}
+
+function entregaFicha(en) {
+  if (!temEntrega(en)) return '';
+  const kv = (l, v) => String(v ?? '').trim() ? `<div class="f-kv"><span>${l}</span>${esc(String(v).trim())}</div>` : '';
+  return [kv('Endereço', enderecoTexto(en)), kv('Recebe', [en.destinatario, en.telefone, en.email].filter(Boolean).join(' · ')),
+    kv('Entrega', [fdate(en.data), en.horario].filter(Boolean).join(' ')), kv('Envio', envioTexto(en)), kv('Obs.', en.obs)].join('');
 }
 
 function fichaAtividade(a) {
@@ -2317,13 +2336,14 @@ function fichaAtividade(a) {
     <header class="f-top"><img src="assets/logo-dello.png" alt="Dello">
       <div class="f-tit"><small>Ficha da atividade Nº ${pad(a.numero)}${a.visibilidade === 'privado' ? ' · Privado' : ''}</small><h2>${esc(a.nome)}</h2>
         <div>${junta(a.tipo, datasAtv(a))}</div>
-        ${clienteTexto(cli) || a.gerente ? `<div>${junta(clienteTexto(cli) && 'Cliente: ' + clienteTexto(cli), a.gerente && 'Gerente: ' + a.gerente)}</div>` : ''}</div>
+        ${clienteTexto(cli) || a.gerente ? `<div>${junta(clienteTexto(cli) && 'Cliente: ' + clienteTexto(cli), a.gerente && 'Solicitante: ' + a.gerente)}</div>` : ''}</div>
       <div class="f-tot"><span class="pill ${SIT[a.situacao]?.cor || 'gray'}">${SIT[a.situacao]?.label || ''}</span><small>Valor</small><b>${brl(a.valor_total)}</b></div>
     </header>
     <div class="f-cols">
       ${bloco('Contrato', contrato, ct.valor ? brl(ct.valor) : '')}
       ${bloco('Compras do cliente', compras)}
       ${bloco('Serviços a realizar', serv)}
+      ${bloco('Endereço de entrega', entregaFicha(d.entrega), comFrete(d.entrega) && Number(d.entrega.frete) > 0 ? brl(d.entrega.frete) : '')}
       ${bloco('Observações', d.observacoes ? `<p class="f-obs">${esc(d.observacoes)}</p>` : '')}
     </div>
     <footer class="f-rod"><span id="fichaAnx"></span><span>Cadastrado por ${esc(nomeDe(a.criado_por))} em ${fdia(a.criado_em)} · Impresso em ${fdt(new Date())} por ${esc(S.me?.nome || '')}</span></footer>
@@ -2361,7 +2381,7 @@ async function viewDetalheAtv(id) {
       <div class="facts">
         <div><span>Início</span><b>${fdate(a.data_inicio) || '—'}</b></div>
         <div><span>Prazo de entrega</span><b>${fdate(a.data_fim) || '—'}</b></div>
-        <div><span>Gerente responsável</span><b>${esc(a.gerente || '—')}</b></div>
+        <div><span>Solicitante</span><b>${esc(a.gerente || '—')}</b></div>
         <div><span>Cadastrado por</span><b>${esc(nomeDe(a.criado_por))}</b><div class="small muted">${fdt(a.criado_em)}</div></div>
         <div><span>Última alteração</span><b>${esc(nomeDe(a.atualizado_por || a.criado_por))}</b><div class="small muted">${fdt(a.atualizado_em)}</div></div>
       </div>
@@ -2385,6 +2405,7 @@ async function viewDetalheAtv(id) {
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px"><button class="btn btn-primary" id="xSalvar">${ic('save')}Salvar execução</button>
           <span class="small muted">As fotos do que foi feito vão em <b>Fotos e arquivos</b>, logo abaixo.</span></div>`
         : (ex?.obs ? `<div style="white-space:pre-wrap">${esc(ex.obs)}</div>` : '')}</div>
+      ${cartaoEntrega(d.entrega)}
       ${d.observacoes ? `<div class="card full"><div class="card-h"><h3>Observações</h3></div><div style="white-space:pre-wrap">${esc(d.observacoes)}</div></div>` : ''}
       <div class="card full" id="anxCard"><div class="card-h"><h3>Fotos e arquivos <span class="muted small" id="anxCount"></span></h3><span class="sp"></span>
         <span class="small muted hidden" id="anxStatus"></span>
@@ -2395,6 +2416,10 @@ async function viewDetalheAtv(id) {
 
   $('#dPrint').onclick = () => window.print();
   $('#dWa').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(textoAtividade(a)), '_blank', 'noopener');
+  $('#enCopiar')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(entregaTexto(d.entrega)); toast('Endereço copiado'); }
+    catch { toast('Não foi possível copiar', 'err'); }
+  });
   $('#dImg').onclick = (x) => enviarFicha('imagem', x.currentTarget, a, 'atividade');
   $('#dPdf').onclick = (x) => enviarFicha('pdf', x.currentTarget, a, 'atividade');
   $('#dDel')?.addEventListener('click', () => excluirEvento(a, () => { location.hash = '#/atividades'; }, 'atividade'));
@@ -2578,7 +2603,7 @@ const relSwitch = () => `<div class="seg seg2 rel-tipo no-print">${[['eventos', 
   .map(([v, l, i, sub]) => `<label class="vis ${(S.relTipo || 'eventos') === v ? 'on' : ''}"><input type="radio" name="relTipo" value="${v}" ${(S.relTipo || 'eventos') === v ? 'checked' : ''}>${ic(i)}<span><b>${l}</b><small>${sub}</small></span></label>`).join('')}</div>`;
 const ligarSwitch = () => $$('input[name=relTipo]').forEach((r) => r.addEventListener('change', () => { S.relTipo = r.value; viewRelatorios(); }));
 
-const COLS_RAT = [['cliente', 'Cliente'], ['tipo', 'Tipo'], ['datas', 'Início · Prazo'], ['gerente', 'Gerente'], ['servicos', 'Serviços'],
+const COLS_RAT = [['cliente', 'Cliente'], ['tipo', 'Tipo'], ['datas', 'Início · Prazo'], ['gerente', 'Solicitante'], ['servicos', 'Serviços'],
   ['responsavel', 'Responsável'], ['conclusao', 'Conclusão'], ['situacao', 'Situação'], ['realizado', 'Realizada'], ['pct', '% compras']];
 
 const legendaSit = () => `<div class="sit-leg"><b>Situação:</b>${SIT_ORDEM.map((x) => `<span>${sitDot(x)}${SIT[x].label}</span>`).join('')}</div>`;
@@ -2634,7 +2659,7 @@ async function viewRelAtividades() {
     const cols = [
       ['tipo', 'Tipo', '', (a) => esc(a.tipo)],
       ['datas', 'Início · Prazo', 'nowrap', (a) => `${fdate(a.data_inicio) || '—'}${a.data_fim ? `<div class="small muted">Prazo ${fdate(a.data_fim)}</div>` : ''}`],
-      ['gerente', 'Gerente', '', (a) => esc(a.gerente)],
+      ['gerente', 'Solicitante', '', (a) => esc(a.gerente)],
       ['servicos', 'Serviços', '', (a) => esc(uniq((a.dados?.servicos || []).map((x) => x.tipo)).join(', ') || '—')],
       ['responsavel', 'Responsável', '', (a) => esc(responsaveisDe(a).join(', ') || '—')],
       ['conclusao', 'Conclusão', 'nowrap', (a) => execDe(a)?.conclusao ? fdate(execDe(a).conclusao) : '<span class="muted">—</span>'],
@@ -2647,8 +2672,9 @@ async function viewRelAtividades() {
       <tfoot><tr><td colspan="${2 + cols.length}">${lista.length} atividade(s)</td><td class="r">${brl(total)}</td></tr></tfoot></table></div>`;
     const detalhe = (a) => { const d = a.dados || {}, ct = d.contrato || {}, ex = execDe(a);
       return `<div class="rep-ev"><div class="h"><span class="seq">Nº ${pad(a.numero)}</span><b>${esc(a.nome)}</b>${clienteTexto(clienteDe(a)) ? `<span class="tag">${esc(clienteTexto(clienteDe(a)))}</span>` : ''}${pill(a.situacao)}<span class="sp"></span><span class="v">${brl(a.valor_total)}</span></div>
-      <div class="i">${esc(a.tipo)} · ${datasAtv(a)} · Gerente: ${esc(a.gerente || '—')}${(ct.tipo || ct.pagamento) ? ' · Contrato: ' + esc(contratoTxt(ct)) : ''}</div>
+      <div class="i">${esc(a.tipo)} · ${datasAtv(a)} · Solicitante: ${esc(a.gerente || '—')}${(ct.tipo || ct.pagamento) ? ' · Contrato: ' + esc(contratoTxt(ct)) : ''}</div>
       ${(d.servicos || []).length ? `<table class="mini"><tbody>${d.servicos.map((x) => `<tr><td style="width:120px"><b>${esc(x.tipo || 'Serviço')}</b></td><td>${esc(x.formato || '')}</td><td>${esc(x.responsavel ? 'Resp.: ' + x.responsavel : '')}</td><td>${esc(x.email || '')}</td></tr>`).join('')}</tbody></table>` : ''}
+      ${temEntrega(d.entrega) ? `<div class="i"><b>Entrega:</b> ${esc(entregaTexto(d.entrega))}</div>` : ''}
       <div class="i"><b>Execução:</b> ${ex?.conclusao ? `concluída em ${fdate(ex.conclusao)}${ex.por ? ' (registrado por ' + esc(ex.por) + ')' : ''}` : 'ainda não concluída'}${ex?.obs ? ' — ' + esc(ex.obs) : ''}${a.realizado ? ' · <b>realizada</b>' : ''}</div></div>`; };
 
     $('#rOut').innerHTML = `<div class="card report">
@@ -2938,12 +2964,13 @@ function baixarCsv(cab, linhas, nome) {
 }
 function exportarCsvAtv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
-  baixarCsv(['Nº', 'Situação', 'Realizada', 'Tipo', 'Atividade', 'Cód. cliente', 'Cliente', 'Gerente', 'Início', 'Prazo de entrega', 'Serviços', 'Responsável pela execução',
-    'Data de conclusão', 'Obs. da execução', 'Tipo do contrato', 'Forma de pagamento', 'Valor', 'Cadastrado por'],
+  baixarCsv(['Nº', 'Situação', 'Realizada', 'Tipo', 'Atividade', 'Cód. cliente', 'Cliente', 'Solicitante', 'Início', 'Prazo de entrega', 'Serviços', 'Responsável pela execução',
+    'Data de conclusão', 'Obs. da execução', 'Tipo do contrato', 'Forma de pagamento', 'Contrato', 'Frete', 'Valor', 'Endereço de entrega', 'Envio', 'Cadastrado por'],
   lista.map((a) => { const ct = a.dados?.contrato || {}, ex = execDe(a) || {};
     return [pad(a.numero), SIT[a.situacao]?.label, a.realizado ? 'Sim' : 'Não', a.tipo, a.nome, clienteDe(a).codigo || '', clienteDe(a).nome || '', a.gerente, fdate(a.data_inicio), fdate(a.data_fim),
       (a.dados?.servicos || []).map((x) => [x.tipo, x.formato].filter(Boolean).join(' — ')).join(' | '), responsaveisDe(a).join(', '),
-      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(a.valor_total), nomeDe(a.criado_por)]; }), 'atividades-dello');
+      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(ct.valor), n(comFrete(a.dados?.entrega) ? a.dados.entrega.frete : 0), n(a.valor_total),
+      enderecoTexto(a.dados?.entrega || {}), envioTexto(a.dados?.entrega || {}), nomeDe(a.criado_por)]; }), 'atividades-dello');
 }
 
 function exportarCsv(lista) {
@@ -2969,7 +2996,7 @@ function exportarCsv(lista) {
 /* ================================================================
    Histórico
    ================================================================ */
-const CAMPOS_H = { situacao: 'Situação', nome: 'Nome', tipo: 'Tipo', local: 'Local', gerente: 'Gerente', data_inicio: 'Início', data_fim: 'Término / prazo', valor_total: 'Valor total', visibilidade: 'Visibilidade', realizado: 'Realizado', conclusao: 'Data de conclusão' };
+const CAMPOS_H = { situacao: 'Situação', nome: 'Nome', tipo: 'Tipo', local: 'Local', gerente: 'Gerente / solicitante', data_inicio: 'Início', data_fim: 'Término / prazo', valor_total: 'Valor total', visibilidade: 'Visibilidade', realizado: 'Realizado', conclusao: 'Data de conclusão' };
 function fmtCampo(k, v) {
   if (v == null || v === '') return '—';
   if (k === 'situacao') return SIT[v]?.label || v;
