@@ -1092,3 +1092,56 @@ table.mini td.c .sit-dot { margin-right: 0; width: 13px; height: 13px; }
 .conf-tipo { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; flex: none; background: var(--brand-50); color: var(--brand-700); }
 .conf-tipo.atividade { background: var(--blue-bg); color: var(--info-ink); }
 @media (max-width: 760px) { .conf-item { flex-wrap: wrap; } .conf-item .conf-acts { width: 100%; padding-left: 52px; } }
+
+/* ---------- solicitações (no sistema) ---------- */
+.conf-aviso.sol { background: var(--brand-50); border-color: var(--warm-border); }
+.conf-aviso.sol > svg.i:first-child { color: var(--brand-700); }
+.sol-link h3 { display: inline-flex; align-items: center; gap: 8px; }
+.sol-link h3 svg.i { color: var(--brand-700); }
+.sol-link-box { display: flex; gap: 8px; flex-wrap: wrap; }
+.sol-link-box input { flex: 1 1 320px; min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.sol-item { border-bottom: 1px solid var(--line-2); }
+.sol-item:last-child { border-bottom: 0; }
+.sol-item summary { display: flex; align-items: center; gap: 14px; padding: 14px 4px; cursor: pointer; list-style: none; }
+.sol-item summary::-webkit-details-marker { display: none; }
+.sol-item summary .t { font-weight: 700; }
+.sol-item summary .s { font-size: 12.5px; color: var(--mute); margin-top: 2px; }
+.sol-item .conf-tipo { background: var(--brand-50); color: var(--brand-700); }
+.sol-abrir svg.i { transition: transform .2s; color: var(--mute); }
+.sol-item[open] .sol-abrir svg.i { transform: rotate(90deg); }
+.sol-det { padding: 4px 4px 18px 56px; }
+@media (max-width: 760px) { .sol-det { padding-left: 4px; } }
+
+/* ---------- formulário público dos representantes ---------- */
+.sol-body { background: var(--bg); }
+.sol-wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 40px; }
+.sol-head { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 3px solid var(--brand); }
+.sol-head img { width: 110px; flex: none; }
+.sol-head h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+.sol-head p { margin: 4px 0 0; color: var(--mute); font-weight: 600; }
+.sol-wrap .card + .card, .sol-wrap .info + .card { margin-top: 16px; }
+.sol-h { margin: 0 0 14px; font-size: 17px; }
+.sol-seg { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sol-seg[data-grupo="retorna"] { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 520px; }
+.sol-seg label.on { border-color: var(--brand); background: var(--brand-50); }
+.sol-seg.invalid { outline: 2px solid var(--red); outline-offset: 3px; border-radius: 12px; }
+.sol-itens { overflow-x: auto; }
+.sol-itens .items td.q { width: 90px; }
+.sol-itens .items td.c { width: 140px; }
+.sol-itens .items td.o { width: 26%; }
+.sol-itens .items td.x { width: 38px; }
+.sol-itens .items input { min-width: 70px; }
+.sol-enviar { margin-top: 18px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.sol-enviar .btn { justify-content: center; font-size: 16px; padding: 14px 20px; }
+.sol-erro { padding: 12px 14px; border-radius: 10px; background: var(--red-bg); color: var(--err-ink); border: 1px solid var(--red-border); font-size: 14px; }
+.sol-aviso, .sol-ok { text-align: center; padding: 36px 22px; }
+.sol-aviso h2, .sol-ok h2 { margin: 0 0 8px; }
+.sol-ok-ic { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 50%; background: var(--green-bg); color: var(--green); font-size: 32px; font-weight: 800; }
+.sol-ok p { max-width: 560px; margin: 8px auto; }
+.sol-ok .btn { margin-top: 14px; }
+.sol-rodape { text-align: center; color: var(--mute); font-size: 12px; margin-top: 24px; }
+@media (max-width: 640px) {
+  .sol-head img { width: 80px; }
+  .sol-head h1 { font-size: 19px; }
+  .sol-seg, .sol-seg[data-grupo="retorna"] { grid-template-columns: minmax(0, 1fr); }
+}
