@@ -17,7 +17,7 @@ const SIT_ORDEM = ['reprovado', 'analise', 'aprovado'];
 const TIPOS = ['Feira', 'Convenção', 'Workshop', 'Ação em cliente', 'Show room', 'Visita na fábrica', 'Palestra', 'Confraternização'];
 const SERVICOS = ['Bancada', 'Prateleiras', 'Mesa', 'Cadeiras', 'TV'];
 const GASTOS = ['Catálogo', 'Amostras', 'Brindes', 'Camisetas', 'Banner', 'Banco', 'Base giratória', 'Suportes', 'Plataforma', 'Toalhas', 'Flores', 'Outros'];
-const TIPOS_ATV = ['Campanha', 'Ação promocional', 'Material gráfico', 'Mídia / anúncio', 'Vídeo', 'Treinamento'];
+const TIPOS_ATV = ['Campanha', 'Ação promocional', 'Material gráfico', 'Mídia / anúncio', 'Vídeo', 'Treinamento', 'Kits, amostras e brindes'];
 const SERVICOS_ATV = ['', 'Anúncio', 'Folder', 'Panfleto', 'Catálogo', 'Vídeo', 'Outros'];
 const MEIOS = ['Aéreo', 'Ônibus', 'Carro', 'Carro alugado', 'Trem', 'Metrô', 'Táxi', 'Uber / 99', 'Van', 'Outro'];
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
@@ -466,6 +466,16 @@ function SupaAPI() {
       const [a, b] = await Promise.all([n('eventos'), n('atividades')]);
       return a + b;
     },
+    async listSolicitacoes() { return chk(await sb.from('solicitacoes').select('*').order('criado_em', { ascending: false }).limit(500)); },
+    async marcarSolicitacao(id, status, atividadeId) {
+      const patch = { status };
+      if (atividadeId !== undefined) patch.atividade_id = atividadeId;
+      const r = chk(await sb.from('solicitacoes').update(patch).eq('id', id).select('id'));
+      if (!r.length) throw new Error('permission denied');
+    },
+    async contarSolicNovas() { const { count, error } = await sb.from('solicitacoes').select('id', { count: 'exact', head: true }).eq('status', 'nova'); if (error) throw error; return count || 0; },
+    async chaveSolic() { return chk(await sb.from('config_solicitacao').select('chave').eq('id', 1).maybeSingle())?.chave || ''; },
+    async novaChaveSolic(chave) { const r = chk(await sb.from('config_solicitacao').update({ chave }).eq('id', 1).select('chave')); if (!r.length) throw new Error('permission denied'); return r[0].chave; },
     async registrarExecucao(id, conclusao, obs) { return chk(await sb.rpc('registrar_execucao', { atividade: id, conclusao: conclusao || null, obs: obs || '' })); },
     async listPerfis() { return chk(await sb.from('perfis').select('*').order('nome')); },
     async updatePerfil(id, patch) {
@@ -712,6 +722,27 @@ function DemoAPI() {
       salvar();
     },
     async contarConferir() { return [...db.eventos, ...db.atividades].filter((x) => x.revisar && visivel(x)).length; },
+    async listSolicitacoes() {
+      if (!isAdmin()) return [];
+      db.solicitacoes ||= [{ id: uid(), numero: 1, criado_em: new Date().toISOString(), status: 'nova', dados: {
+        cliente_codigo: '10234', cliente_nome: 'Papelaria Exemplo Ltda', solicitante: 'Carlos (representante)', contato: 'carlos@exemplo.com',
+        cep: '01310-100', rua: 'Av. Paulista', numero: '1000', complemento: 'Loja 2', bairro: 'Bela Vista', cidade: 'São Paulo', uf: 'SP',
+        tipo: 'Amostra', evento: 'Visita ao cliente', data_evento: addDias(hojeISO(), 12), prazo_entrega: addDias(hojeISO(), 8),
+        forma_entrega: 'transportadora', material_retorna: 'Não', data_solicitacao: hojeISO(),
+        itens: [{ qtd: 10, cod: 'DL-501', descricao: 'Organizador multiuso 5 L', obs: '' }, { qtd: 5, cod: 'DL-220', descricao: 'Caixa organizadora 20 L', obs: 'cor azul' }] } }];
+      return clone(db.solicitacoes);
+    },
+    async marcarSolicitacao(id, status, atividadeId) {
+      if (!isAdmin()) negar();
+      const x = (db.solicitacoes || []).find((o) => o.id === id);
+      if (!x) negar();
+      x.status = status; if (atividadeId !== undefined) x.atividade_id = atividadeId;
+      x.tratado_por = atual; x.tratado_em = new Date().toISOString();
+      salvar();
+    },
+    async contarSolicNovas() { return isAdmin() ? (db.solicitacoes || [1]).filter((x) => x === 1 || x.status === 'nova').length : 0; },
+    async chaveSolic() { db.chaveSolic ||= 'demonstracao123'; return db.chaveSolic; },
+    async novaChaveSolic(chave) { if (!isAdmin()) negar(); db.chaveSolic = chave; salvar(); return chave; },
     async listPerfis() { return clone(db.perfis).sort((a, b) => a.nome.localeCompare(b.nome)); },
     async updatePerfil(id, patch) {
       if (!isAdmin()) negar();
@@ -766,6 +797,7 @@ function atualizarConferir(forcar = false) {
   if (!isAdmin() || (!forcar && $('#confBadge')?.dataset.ok && Date.now() - confChecado < 15000)) return;
   confChecado = Date.now();
   api.contarConferir?.().then((n) => { const b = $('#confBadge'); if (b) { b.textContent = n; b.dataset.ok = '1'; b.classList.toggle('hidden', !n); } }).catch(() => { /* coluna ainda não existe */ });
+  api.contarSolicNovas?.().then((n) => { const b = $('#solBadge'); if (b) { b.textContent = n; b.classList.toggle('hidden', !n); } }).catch(() => { /* tabela ainda não existe */ });
 }
 // Faixa no topo do evento/atividade: admin aprova ali mesmo; o dono vê que está aguardando
 function faixaConferir(r, kind) {
@@ -993,7 +1025,7 @@ function renderShell() {
         <div class="grp">Acompanhamento</div>
         <a href="#/relatorios" data-r="relatorios">${ic('chart')}Relatórios</a>
         <a href="#/historico" data-r="historico">${ic('clock')}Histórico</a>
-        ${isAdmin() ? `<div class="grp">Administração</div><a href="#/conferir" data-r="conferir">${ic('checkc')}Conferir<span class="badge hidden" id="confBadge"></span></a><a href="#/usuarios" data-r="usuarios">${ic('users')}Usuários<span class="badge ${pend ? '' : 'hidden'}" id="pendBadge">${pend}</span></a>` : ''}
+        ${isAdmin() ? `<div class="grp">Administração</div><a href="#/solicitacoes" data-r="solicitacoes">${ic('box')}Solicitações<span class="badge hidden" id="solBadge"></span></a><a href="#/conferir" data-r="conferir">${ic('checkc')}Conferir<span class="badge hidden" id="confBadge"></span></a><a href="#/usuarios" data-r="usuarios">${ic('users')}Usuários<span class="badge ${pend ? '' : 'hidden'}" id="pendBadge">${pend}</span></a>` : ''}
       </nav>
       ${appInstalado() ? '' : `<button type="button" class="nav-inst" id="btnInstalar">${ic('monitor')}<span>Instalar aplicativo<small>Ícone na área de trabalho ou no celular</small></span></button>`}
       <div class="me">
@@ -1083,6 +1115,7 @@ const ROTAS = [
   [/^#\/historico$/, 'historico', () => viewHistorico()],
   [/^#\/usuarios$/, 'usuarios', () => viewUsuarios()],
   [/^#\/conferir$/, 'conferir', () => viewConferir()],
+  [/^#\/solicitacoes$/, 'solicitacoes', () => viewSolicitacoes()],
 ];
 let ultimoHash = location.hash, ignorar = false;
 
@@ -1138,7 +1171,8 @@ async function viewPainel() {
   const minhas = (S.atividades || []).filter((a) => souResponsavel(a) && !a.realizado);
   const conferir = isExecutor() ? [] : (S.atividades || []).filter((a) => podeEditar(a) && execDe(a)?.conclusao && !a.realizado);
   const paraConferir = isAdmin() ? [...evs, ...(S.atividades || [])].filter((r) => r.revisar).length : 0;
-  const avisos = () => `${paraConferir ? `<a class="conf-aviso" href="#/conferir">${ic('hourglass')}<div class="grow"><b>${paraConferir} ${paraConferir > 1 ? 'cadastros aguardam' : 'cadastro aguarda'} sua conferência</b><span>Usuários cadastraram, alteraram ou concluíram eventos e atividades. Clique para conferir e aprovar.</span></div>${ic('chevR')}</a>` : ''}${minhas.length ? `<div class="card exec-painel"><div class="card-h"><h3>${ic('megaphone')}Atividades para você executar</h3><span class="sp"></span><a class="btn btn-sm" href="#/atividades">Ver todas</a></div>
+  const solNovas = isAdmin() ? await api.contarSolicNovas().catch(() => 0) : 0;
+  const avisos = () => `${solNovas ? `<a class="conf-aviso sol" href="#/solicitacoes">${ic('box')}<div class="grow"><b>${solNovas} ${solNovas > 1 ? 'solicitações novas' : 'solicitação nova'} dos representantes</b><span>Kits, amostras e brindes pedidos pelo formulário. Clique para ver e lançar como atividade.</span></div>${ic('chevR')}</a>` : ''}${paraConferir ? `<a class="conf-aviso" href="#/conferir">${ic('hourglass')}<div class="grow"><b>${paraConferir} ${paraConferir > 1 ? 'cadastros aguardam' : 'cadastro aguarda'} sua conferência</b><span>Usuários cadastraram, alteraram ou concluíram eventos e atividades. Clique para conferir e aprovar.</span></div>${ic('chevR')}</a>` : ''}${minhas.length ? `<div class="card exec-painel"><div class="card-h"><h3>${ic('megaphone')}Atividades para você executar</h3><span class="sp"></span><a class="btn btn-sm" href="#/atividades">Ver todas</a></div>
       <div class="list-ev">${minhas.slice(0, 8).map((a) => `<a href="#/atividades/${a.id}"><div class="datebox"><b>${(a.data_fim || '').slice(8, 10) || '—'}</b><span>${a.data_fim ? MESES[+a.data_fim.slice(5, 7) - 1] : 'prazo'}</span></div>
         <div class="grow"><div class="t">${esc(a.nome)}</div><div class="s">${a.data_fim ? 'Prazo de entrega ' + fdate(a.data_fim) : 'Sem prazo'}${execDe(a)?.conclusao ? ' · concluída em ' + fdate(execDe(a).conclusao) : ''}</div></div>${execDe(a)?.conclusao ? `<span class="exec-tag">${ic('checkc')}Enviada</span>` : pill(a.situacao)}</a>`).join('')}</div></div>` : ''}
     ${conferir.length ? `<div class="info warn">${ic('checkc')}<div><b>${conferir.length} atividade(s) com conclusão registrada</b> aguardando você conferir e marcar como realizada: ${conferir.slice(0, 5).map((a) => `<a href="#/atividades/${a.id}">Nº ${pad(a.numero)} ${esc(a.nome)}</a>`).join(', ')}.</div></div>` : ''}`;
@@ -1763,6 +1797,8 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
     if (duplicar) ev = { ...clone(ev), id: null, numero: null, nome: ev.nome + ' (cópia)', situacao: 'analise', criado_por: null };
     else if (!podeEditar(ev)) { toast(`Você só pode editar ${K.sing}s que você criou.`, 'err'); location.hash = `#/${K.rota}/${id}`; return; }
   } else ev = A ? novaAtividade() : novoEvento();
+  let solicOrigem = null;
+  if (!id && A && S.prefillAtv) { ev = { ...ev, ...S.prefillAtv.reg }; solicOrigem = S.prefillAtv; S.prefillAtv = null; }
   const novo = !ev.id;
   const d = A ? normalizarAtv(ev.dados) : normalizarDados(ev.dados);
   if (!S.eventos.length) { try { S.eventos = await api.listEventos(); } catch { /* sugestões são opcionais */ } }
@@ -1777,7 +1813,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   const voltar = novo ? '#/' + K.rota : `#/${K.rota}/${ev.id}`;
 
   setPage(novo ? (duplicar ? `Duplicar ${K.sing}` : K.nova) : `Editar ${K.sing} Nº ${pad(ev.numero)}`,
-    novo ? 'Preencha as informações. O número é gerado automaticamente ao salvar.' : esc(ev.nome),
+    solicOrigem ? `Preenchida com a solicitação Nº ${pad(solicOrigem.numero)} do representante. Confira e salve.` : novo ? 'Preencha as informações. O número é gerado automaticamente ao salvar.' : esc(ev.nome),
     `<a class="btn" href="${voltar}">Cancelar</a><button class="btn btn-primary" type="submit" form="frm">${ic('save')}Salvar</button>`);
   $('#shell').classList.add('has-savebar');
 
@@ -2240,6 +2276,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
         pendentes.forEach((p) => p.url && URL.revokeObjectURL(p.url));
       }
       const extra = enviados ? ` com ${enviados} arquivo${enviados > 1 ? 's' : ''}` : '';
+      if (solicOrigem && novo) { try { await api.marcarSolicitacao(solicOrigem.id, 'lancada', salvo.id); atualizarConferir(true); } catch { toast('Atividade salva, mas não foi possível marcar a solicitação como lançada.', 'err'); } }
       toast(novo ? `${K.Sing} Nº ${pad(salvo.numero)} cadastrad${K.o}${extra}` : `Alterações salvas${extra}`);
       location.hash = `#/${K.rota}/${salvo.id}`;
     } catch (x) {
@@ -2448,6 +2485,106 @@ async function viewDetalheAtv(id) {
   }
   api.historico(a.id).then((hs) => { $('#dHist') && ($('#dHist').innerHTML = hs.length ? timeline(hs, false) : '<p class="muted small" style="margin:0">Sem registros.</p>'); })
     .catch(() => { $('#dHist') && ($('#dHist').innerHTML = '<p class="muted small">Não foi possível carregar o histórico.</p>'); });
+}
+
+/* ================================================================
+   Solicitações dos representantes (formulário público)
+   ================================================================ */
+const FORMA_SOL = { proprio: 'Nosso carro', transportadora: 'Transportadora', correio: 'Correio' };
+const linkSolic = (chave) => `${location.origin}${location.pathname.replace(/[^/]*$/, '')}solicitar.html?k=${encodeURIComponent(chave)}`;
+const novaChave = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
+
+// Solicitação → atividade já preenchida (a pessoa confere e salva)
+function atividadeDaSolic(x) {
+  const d = x.dados || {};
+  const itens = (d.itens || []).map((i) => `• ${i.qtd} × [${i.cod}] ${i.descricao}${i.obs ? ' — ' + i.obs : ''}`).join('\n');
+  return {
+    nome: `${d.tipo || 'Solicitação'} — ${d.evento || ''}${d.cliente_nome ? ' (' + d.cliente_nome + ')' : ''}`.slice(0, 160),
+    tipo: 'Kits, amostras e brindes', gerente: d.solicitante || '', data_inicio: d.data_solicitacao || '', data_fim: d.prazo_entrega || '',
+    dados: {
+      cliente: { codigo: d.cliente_codigo || '', nome: d.cliente_nome || '' },
+      entrega: { cep: d.cep || '', rua: d.rua || '', numero: d.numero || '', complemento: d.complemento || '', bairro: d.bairro || '', cidade: d.cidade || '', uf: d.uf || '',
+        data: d.prazo_entrega || '', modo: d.forma_entrega || '', email: /@/.test(d.contato || '') ? d.contato : '', telefone: /@/.test(d.contato || '') ? '' : (d.contato || '') },
+      servicos: [],
+      observacoes: `Solicitação Nº ${pad(x.numero)} de ${fdate(d.data_solicitacao)} (formulário dos representantes)\n`
+        + `Tipo: ${d.tipo} · Evento: ${d.evento}${d.data_evento ? ' em ' + fdate(d.data_evento) : ''}\nMaterial retorna: ${d.material_retorna}\nContato: ${d.contato}\n\nItens:\n${itens}`,
+    },
+  };
+}
+
+async function viewSolicitacoes() {
+  if (!isAdmin()) { location.hash = '#/painel'; return; }
+  setPage('Solicitações', 'Pedidos de kits, amostras e brindes enviados pelos representantes pelo formulário');
+  carregando();
+  const [lista, chave] = await Promise.all([api.listSolicitacoes(), api.chaveSolic().catch(() => '')]);
+  const F = S.filtroSol ||= 'nova';
+  const cont = (st) => lista.filter((x) => x.status === st).length;
+  const item = (x) => {
+    const d = x.dados || {};
+    return `<details class="sol-item ${x.status}" data-id="${x.id}">
+      <summary><span class="conf-tipo">${ic('box')}</span>
+        <div class="grow"><div class="t">Nº ${pad(x.numero)} · ${esc(d.tipo)} — ${esc(d.evento)}</div>
+          <div class="s"><b>${esc(d.cliente_nome)}</b> (cód. ${esc(d.cliente_codigo)}) · solicitante ${esc(d.solicitante)} · ${(d.itens || []).length} item(ns)</div>
+          <div class="s">Enviada em ${fdt(x.criado_em)} · prazo de entrega <b>${fdate(d.prazo_entrega)}</b>${x.status === 'lancada' ? ` · <span class="tag feito">${ic('check')}Lançada${x.tratado_por ? ' por ' + esc(nomeDe(x.tratado_por)) : ''}</span>` : x.status === 'arquivada' ? ' · <span class="tag">Arquivada</span>' : ''}</div></div>
+        <span class="sol-abrir">${ic('chevR')}</span></summary>
+      <div class="sol-det">
+        <div class="grid g4">
+          <div><div class="lbl">Cliente / repres.</div>${esc(d.cliente_nome)}<div class="small muted">Cód. ${esc(d.cliente_codigo)}</div></div>
+          <div><div class="lbl">Solicitante</div>${esc(d.solicitante)}<div class="small muted">${esc(d.contato)}</div></div>
+          <div><div class="lbl">Tipo · Evento</div>${esc(d.tipo)} · ${esc(d.evento)}<div class="small muted">Evento em ${fdate(d.data_evento)}</div></div>
+          <div><div class="lbl">Datas</div>Solicitação ${fdate(d.data_solicitacao)}<div class="small muted">Prazo de entrega ${fdate(d.prazo_entrega)}</div></div>
+          <div class="span2"><div class="lbl">Endereço de entrega</div>${esc(enderecoTexto(d))}</div>
+          <div><div class="lbl">Forma de entrega</div>${esc(FORMA_SOL[d.forma_entrega] || d.forma_entrega)}</div>
+          <div><div class="lbl">Material retorna</div>${esc(d.material_retorna)}</div>
+        </div>
+        <div style="overflow-x:auto;margin-top:14px"><table class="mini"><thead><tr><th class="r">Qtd.</th><th>Cód. prod.</th><th>Descrição</th><th>Observação</th></tr></thead>
+          <tbody>${(d.itens || []).map((i) => `<tr><td class="r">${esc(i.qtd)}</td><td>${esc(i.cod)}</td><td>${esc(i.descricao)}</td><td>${esc(i.obs || '')}</td></tr>`).join('')}</tbody></table></div>
+        <div class="conf-acts" style="margin-top:14px">
+          ${x.status === 'lancada' && x.atividade_id ? `<a class="btn btn-sm" href="#/atividades/${x.atividade_id}">${ic('eye')}Ver a atividade</a>` : ''}
+          ${x.status !== 'lancada' ? `<button class="btn btn-sm btn-primary" data-lancar>${ic('plus')}Lançar como atividade</button>` : ''}
+          ${x.status === 'nova' ? `<button class="btn btn-sm" data-st="arquivada" title="Tira da lista de novas sem lançar">Arquivar</button>` : `<button class="btn btn-sm btn-ghost" data-st="nova">Voltar para novas</button>`}
+        </div>
+      </div></details>`;
+  };
+  const desenhar = () => {
+    const vis = lista.filter((x) => x.status === S.filtroSol);
+    $('#solLista').innerHTML = vis.length ? vis.map(item).join('')
+      : vazio('box', S.filtroSol === 'nova' ? 'Nenhuma solicitação nova' : 'Nada por aqui', S.filtroSol === 'nova' ? 'Quando um representante enviar o formulário, o pedido aparece aqui.' : '');
+    $$('#solChips .chip').forEach((c) => c.classList.toggle('on', c.dataset.f === S.filtroSol));
+  };
+  view().innerHTML = `<div class="card sol-link">
+      <div class="card-h"><h3>${ic('box')}Link do formulário para os representantes</h3></div>
+      ${chave ? `<p class="small muted" style="margin:-4px 0 10px">Envie este link para os representantes. Todos os campos são obrigatórios e o pedido chega aqui. Se o link cair em mãos erradas, gere um novo: o antigo para de funcionar.</p>
+      <div class="sol-link-box"><input id="solUrl" readonly value="${esc(linkSolic(chave))}"><button class="btn btn-primary" id="solCopiar">${ic('copy')}Copiar link</button>
+        <a class="btn" href="${esc(linkSolic(chave))}" target="_blank" rel="noopener">${ic('eye')}Abrir</a><button class="btn btn-ghost" id="solNova">Gerar link novo</button></div>`
+      : '<p class="muted small">Não foi possível carregar o link.</p>'}
+    </div>
+    <div class="card"><div class="chips" id="solChips" style="margin-bottom:14px">
+      ${[['nova', 'Novas'], ['lancada', 'Lançadas'], ['arquivada', 'Arquivadas']].map(([f, l]) => `<button class="chip" data-f="${f}">${l} <span style="opacity:.6">${cont(f)}</span></button>`).join('')}</div>
+      <div id="solLista"></div></div>`;
+  $$('#solChips .chip').forEach((c) => c.onclick = () => { S.filtroSol = c.dataset.f; desenhar(); });
+  $('#solCopiar')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('#solUrl').value); toast('Link copiado. Agora é só colar no WhatsApp ou e-mail dos representantes.'); }
+    catch { $('#solUrl').select(); toast('Selecione e copie o link (Ctrl+C).', 'err'); }
+  });
+  $('#solNova')?.addEventListener('click', async () => {
+    if (!(await confirmar('Gerar um link novo?', 'O link atual para de funcionar na hora. Você vai precisar mandar o link novo para todos os representantes.', { icon: 'key', ok: 'Gerar link novo' }))) return;
+    try { await api.novaChaveSolic(novaChave()); toast('Link novo gerado'); viewSolicitacoes(); } catch (x) { toast(msgErro(x), 'err'); }
+  });
+  $('#solLista').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-lancar], [data-st]');
+    if (!b) return;
+    const x = lista.find((o) => o.id === b.closest('.sol-item').dataset.id);
+    if (b.dataset.lancar !== undefined) {
+      S.prefillAtv = { id: x.id, numero: x.numero, reg: atividadeDaSolic(x) };
+      location.hash = '#/atividades/nova';
+      return;
+    }
+    b.disabled = true;
+    try { await api.marcarSolicitacao(x.id, b.dataset.st); x.status = b.dataset.st; toast(b.dataset.st === 'arquivada' ? `Solicitação Nº ${pad(x.numero)} arquivada` : 'Voltou para novas'); atualizarConferir(true); viewSolicitacoes(); }
+    catch (y) { b.disabled = false; toast(msgErro(y), 'err'); }
+  });
+  desenhar();
 }
 
 /* ================================================================
