@@ -273,7 +273,9 @@ function subtotais(d = {}) {
     mercadoria: mercDe(d.entrega),
   };
 }
-const totalAtv = (d) => Math.round((Math.max(0, Number(d?.contrato?.valor) || 0) + entregaValor(d?.entrega)) * 100) / 100;
+const remessasDe = (d) => (Array.isArray(d?.remessas) ? d.remessas : []).filter((r) => r && typeof r === 'object' && !Array.isArray(r));
+const envios = (d) => [d?.entrega || {}, ...remessasDe(d)];   // entrega principal + remessas extras
+const totalAtv = (d) => Math.round((Math.max(0, Number(d?.contrato?.valor) || 0) + soma(envios(d), entregaValor)) * 100) / 100;
 const totalDe = (d) => Math.round(soma(Object.values(subtotais(d))) * 100) / 100;
 
 // Garante o formato esperado dos dados vindos do banco (proteção contra registros malformados)
@@ -282,7 +284,7 @@ function sanearAtv(a) {
   const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x)) ? x : {};
   const d = obj(a.dados);
   a.dados = {
-    ...d, cliente: obj(d.cliente), contrato: obj(d.contrato), entrega: obj(d.entrega), compras: comprasDe(d),
+    ...d, cliente: obj(d.cliente), contrato: obj(d.contrato), entrega: obj(d.entrega), remessas: remessasDe(d), compras: comprasDe(d),
     servicos: Array.isArray(d.servicos) ? d.servicos.filter((i) => i && typeof i === 'object' && !Array.isArray(i)) : [],
     observacoes: typeof d.observacoes === 'string' ? d.observacoes : '',
   };
@@ -1454,9 +1456,9 @@ function fichaHtml(e) {
 }
 
 // Cartão "Endereço de entrega" (evento e atividade)
-const cartaoEntrega = (en = {}) => `<div class="card full"><div class="card-h"><h3>Endereço de entrega</h3>${entregaValor(en) > 0 ? `<b class="num" style="margin-left:10px">${brl(entregaValor(en))}</b>` : ''}<span class="sp"></span>
+const cartaoEntrega = (en = {}, titulo = 'Endereço de entrega', i = 0) => `<div class="card full"><div class="card-h"><h3>${titulo}</h3>${entregaValor(en) > 0 ? `<b class="num" style="margin-left:10px">${brl(entregaValor(en))}</b>` : ''}<span class="sp"></span>
         ${temEntrega(en) && enderecoMapa(en) ? `<a class="btn btn-sm no-print" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(enderecoMapa(en))}" target="_blank" rel="noopener">${ic('pin')}Abrir no mapa</a>` : ''}
-        ${temEntrega(en) ? `<button type="button" class="btn btn-sm no-print" id="enCopiar">${ic('copy')}Copiar</button>` : ''}</div>
+        ${temEntrega(en) ? `<button type="button" class="btn btn-sm no-print" data-copiar="${i}">${ic('copy')}Copiar</button>` : ''}</div>
         ${temEntrega(en) ? `<div class="grid g4">
           <div class="span2"><div class="lbl">Endereço</div>${esc(enderecoTexto(en)) || '—'}</div>
           <div><div class="lbl">Quem recebe</div>${esc(en.destinatario || '—')}${en.telefone ? `<div class="small muted">${esc(en.telefone)}</div>` : ''}${en.email ? `<div class="small"><a href="mailto:${encodeURIComponent(en.email)}">${esc(en.email)}</a></div>` : ''}</div>
@@ -1464,6 +1466,13 @@ const cartaoEntrega = (en = {}) => `<div class="card full"><div class="card-h"><
           ${envioTexto(en) ? `<div class="span-all envio-det">${ic(ENVIOS.find((x) => x[0] === en.modo)?.[2] || 'truck')}<div><div class="lbl">Como vai ser enviado</div><b>${esc(envioTexto(en))}</b></div></div>` : ''}
           ${en.obs ? `<div class="span-all"><div class="lbl">Observações</div>${esc(en.obs)}</div>` : ''}
         </div>` : '<p class="muted small" style="margin:0">Nenhum endereço de entrega informado.</p>'}</div>`;
+
+function ligarCopiar(lista) {
+  $$('[data-copiar]').forEach((b) => b.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(entregaTexto(lista[+b.dataset.copiar] || {})); toast('Endereço copiado'); }
+    catch { toast('Não foi possível copiar', 'err'); }
+  }));
+}
 
 async function viewDetalhe(id) {
   carregando();
@@ -1539,10 +1548,7 @@ async function viewDetalhe(id) {
     </div></div>`;
 
   $('#dPrint').onclick = () => window.print();
-  $('#enCopiar')?.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(entregaTexto(d.entrega)); toast('Endereço copiado'); }
-    catch { toast('Não foi possível copiar', 'err'); }
-  });
+  ligarCopiar([d.entrega]);
   carregarAnexos(e, pode);
   $('#anxEmail').addEventListener('click', async () => {
     const btn = $('#anxEmail');
@@ -1746,6 +1752,7 @@ function normalizarAtv(d = {}) {
     contrato: { data: '', tipo: '', pagamento: '', valor: '', ...(d.contrato || {}) },
     entrega: { destinatario: '', telefone: '', email: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '',
       modo: '', motorista: '', transportadora: '', coleta: '', rastreio: '', frete: '', mercadoria: '', ...(d.entrega || {}) },
+    remessas: remessasDe(d),
     servicos: Array.isArray(d.servicos) ? d.servicos.filter((x) => x && typeof x === 'object') : [],
     observacoes: d.observacoes || '',
   };
@@ -1769,6 +1776,53 @@ function repHtml(tipo, obj = {}, n = 1) {
     <button type="button" class="btn btn-ghost icon-btn" data-rm title="Remover" aria-label="Remover">${ic('trash')}</button></div>
     <div class="rep-grid">${cfg.campos.map((c) => campoRep(c, obj[c.k])).join('')}</div></div>`;
 }
+// Remessa extra: mesmos campos da entrega, sem ids (lidos por data-rk)
+function remessaHtml(r = {}, n = 2) {
+  const k = 'rem-' + Math.random().toString(36).slice(2, 9);
+  const f = (rk, l, extra = '', cls = '', val = r[rk]) => `<div class="field ${cls}"><label>${l}</label><input data-rk="${rk}" value="${esc(val)}" ${extra}></div>`;
+  const m = r.modo || '';
+  return `<div class="remessa" data-remessa>
+    <div class="rem-h"><span class="rem-n">Remessa ${n}</span><span class="sp"></span><button type="button" class="btn btn-sm btn-ghost btn-danger" data-rm-rem>${ic('trash')}Remover remessa</button></div>
+    <div class="lbl">Como vai ser enviado</div>
+    <div class="seg seg4">${ENVIOS.map(([v, l, i, sub]) => `<label class="vis ${m === v ? 'on' : ''}"><input type="radio" name="${k}" data-rk="modo" value="${v}" ${m === v ? 'checked' : ''}>${ic(i)}<span><b>${l}</b><small>${sub}</small></span></label>`).join('')}</div>
+    <div class="grid g4 envio-campos ${m ? '' : 'hidden'}" data-envio-box>
+      <div class="field span2" data-envio="proprio"><label>Quem vai levar</label><input data-rk="motorista" value="${esc(r.motorista)}" maxlength="120" placeholder="Nome de quem leva os materiais"></div>
+      <div class="field span2" data-envio="transportadora"><label>Nome da transportadora</label><input data-rk="transportadora" value="${esc(r.transportadora)}" maxlength="120" placeholder="Ex.: Braspress, Jadlog…"></div>
+      <div class="field" data-envio="transportadora"><label>Dia da coleta</label><input type="date" data-rk="coleta" value="${esc(r.coleta)}"></div>
+      <div class="field span2" data-envio="correio"><label>Número de rastreio</label><input data-rk="rastreio" value="${esc(r.rastreio)}" maxlength="60" placeholder="Ex.: AB123456789BR" style="text-transform:uppercase"></div>
+      <div class="field" data-envio="transportadora correio"><label>Valor do frete</label><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-rk="frete" value="${fmtNum(r.frete)}" placeholder="0,00"></div><div class="hint">Entra no total da atividade</div></div>
+      <div class="field" data-envio="proprio transportadora correio"><label>Valor da mercadoria</label><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-rk="mercadoria" value="${fmtNum(r.mercadoria)}" placeholder="0,00"></div><div class="hint">Entra no total da atividade</div></div>
+    </div>
+    <div class="grid g4">
+      ${f('destinatario', 'Quem recebe', 'maxlength="120" placeholder="Nome do responsável pelo recebimento"')}
+      ${f('telefone', 'Telefone', 'type="tel" maxlength="40" placeholder="(00) 00000-0000"')}
+      ${f('email', 'E-mail do cliente', 'type="email" maxlength="200" placeholder="nome@empresa.com.br"')}
+      <div class="field"><label>CEP</label><input data-rk="cep" inputmode="numeric" value="${esc(r.cep)}" maxlength="9" placeholder="00000-000"><div class="hint" data-cepmsg>Preenche o endereço sozinho</div></div>
+      ${f('rua', 'Endereço', 'maxlength="200" placeholder="Rua, avenida…"', 'span2')}
+      ${f('numero', 'Número', 'maxlength="20"')}
+      ${f('complemento', 'Complemento', 'maxlength="120" placeholder="Pavilhão, estande, sala…"')}
+      ${f('bairro', 'Bairro', 'maxlength="100"')}
+      ${f('cidade', 'Cidade', 'maxlength="100"')}
+      <div class="field"><label>UF</label><select data-rk="uf"><option value=""></option>${UFS.map((u) => `<option ${r.uf === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+      <div class="field"><label>Data de entrega</label><input type="date" data-rk="data" value="${esc(r.data)}"></div>
+      ${f('horario', 'Horário de recebimento', 'maxlength="60" placeholder="Ex.: 8h às 17h"')}
+      ${f('obs', 'Observações da entrega', 'maxlength="300" placeholder="Doca, portão de carga, agendamento, nota fiscal…"', 'span3')}
+    </div>
+  </div>`;
+}
+function lerRemessa(b) {
+  const g = (k) => ($(`[data-rk="${k}"]`, b)?.value || '').trim();
+  const modo = $('[data-rk="modo"]:checked', b)?.value || '';
+  return {
+    destinatario: g('destinatario'), telefone: g('telefone'), email: g('email').toLowerCase(), cep: g('cep'), rua: g('rua'), numero: g('numero'),
+    complemento: g('complemento'), bairro: g('bairro'), cidade: g('cidade'), uf: g('uf'), data: g('data'), horario: g('horario'), obs: g('obs'), modo,
+    motorista: modo === 'proprio' ? g('motorista') : '',
+    transportadora: modo === 'transportadora' ? g('transportadora') : '', coleta: modo === 'transportadora' ? g('coleta') : '',
+    rastreio: modo === 'correio' ? g('rastreio').toUpperCase() : '',
+    frete: comFrete({ modo }) ? parseMoney(g('frete')) : '', mercadoria: modo ? parseMoney(g('mercadoria')) : '',
+  };
+}
+
 function itemHtml(grupo, it) {
   const obs = grupo === 'gastos' || grupo === 'servicos';
   const u = unitDe(it);
@@ -1871,6 +1925,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   const secEntrega = (n) => `
       <section class="card">
         ${secH(n, 'Endereço de entrega', `Para onde enviar produtos, amostras e materiais d${K.o} ${K.sing}`, 'frete')}
+        ${A ? '<div class="rem-h rem-1"><span class="rem-n">Remessa 1</span></div>' : ''}
         <div class="lbl">Como vai ser enviado</div>
         <div class="seg seg4" id="segEnvio">${ENVIOS.map(([m, l, i, sub]) => `<label class="vis ${(d.entrega?.modo || '') === m ? 'on' : ''}"><input type="radio" name="envio" value="${m}" ${(d.entrega?.modo || '') === m ? 'checked' : ''}>${ic(i)}<span><b>${l}</b><small>${sub}</small></span></label>`).join('')}</div>
         <div class="grid g4 envio-campos" id="envioCampos">
@@ -1896,6 +1951,9 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
           <div class="field"><label for="f-en-hora">Horário de recebimento</label><input id="f-en-hora" value="${esc(d.entrega?.horario)}" maxlength="60" placeholder="Ex.: 8h às 17h"></div>
           <div class="field span3"><label for="f-en-obs">Observações da entrega</label><input id="f-en-obs" value="${esc(d.entrega?.obs)}" maxlength="300" placeholder="Doca, portão de carga, agendamento, nota fiscal…"></div>
         </div>
+        ${A ? `<div id="remessas">${remessasDe(d).map((r, i) => remessaHtml(r, i + 2)).join('')}</div>
+        <button type="button" class="btn add-row" id="addRem">${ic('plus')}Adicionar remessa</button>
+        <div class="kbd-hint">${ic('info')}<span>Use <b>Adicionar remessa</b> quando for enviar para mais de um lugar. O frete e a mercadoria de cada remessa entram no total.</span></div>` : ''}
       </section>`;
 
   const secoesEvento = `
@@ -2040,7 +2098,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
     };
     if (A) {
       return { ...comum, dados: { ...extra,
-        cliente, compras, entrega, contrato: { data: v('ct-data'), tipo: v('ct-tipo'), pagamento: v('ct-pag'), valor: parseMoney(v('ct-valor')) },
+        cliente, compras, entrega, remessas: $$('[data-remessa]', frm).map(lerRemessa).filter(temEntrega), contrato: { data: v('ct-data'), tipo: v('ct-tipo'), pagamento: v('ct-pag'), valor: parseMoney(v('ct-valor')) },
         servicos: linhas('servicosAtv').map((x) => ({ ...x, email: (x.email || '').toLowerCase() })), observacoes: $('#f-obs').value.trim(),
       } };
     }
@@ -2057,7 +2115,8 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
 
   const atualizar = () => {
     const f = ler();
-    const st = A ? { contrato: Math.max(0, Number(f.dados.contrato.valor) || 0), frete: comFrete(f.dados.entrega) ? Math.max(0, Number(f.dados.entrega.frete) || 0) : 0, mercadoria: mercDe(f.dados.entrega) } : subtotais(f.dados);
+    const st = A ? { contrato: Math.max(0, Number(f.dados.contrato.valor) || 0),
+      frete: soma(envios(f.dados), (x) => comFrete(x) ? Math.max(0, Number(x.frete) || 0) : 0), mercadoria: soma(envios(f.dados), mercDe) } : subtotais(f.dados);
     const tot = A ? totalAtv(f.dados) : totalDe(f.dados);
     $('#rs-nome').textContent = f.nome || `${K.Sing} sem nome`;
     $('#rs-sit').innerHTML = pill(f.situacao) + ` <span class="tag">${esc(f.tipo)}</span>`;
@@ -2080,8 +2139,15 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
     $$('#seg label, #segVis label, #segEnvio label').forEach((l) => l.classList.toggle('on', $('input', l).checked));
     {
       const modo = f.dados.entrega.modo;
-      $$('[data-envio]').forEach((el) => el.classList.toggle('hidden', !el.dataset.envio.split(' ').includes(modo)));
+      $$('#envioCampos [data-envio]').forEach((el) => el.classList.toggle('hidden', !el.dataset.envio.split(' ').includes(modo)));
       $('#envioCampos').classList.toggle('hidden', !modo);
+      $$('[data-remessa]', frm).forEach((b, i) => {
+        const m = $('[data-rk="modo"]:checked', b)?.value || '';
+        $$('[data-envio]', b).forEach((el) => el.classList.toggle('hidden', !el.dataset.envio.split(' ').includes(m)));
+        $('[data-envio-box]', b).classList.toggle('hidden', !m);
+        $$('.seg label', b).forEach((l) => l.classList.toggle('on', $('input', l).checked));
+        $('.rem-n', b).textContent = `Remessa ${i + 2}`;
+      });
     }
     if ($('#dl-env') && f.dados.envolvidos) $('#dl-env').innerHTML = uniq(f.dados.envolvidos).map((n) => `<option value="${esc(n)}">`).join('');
   };
@@ -2095,6 +2161,38 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   atualizar();
 
   frm.addEventListener('input', () => { S.dirty = true; atualizar(); });
+  $('#addRem')?.addEventListener('click', () => {
+    $('#remessas').insertAdjacentHTML('beforeend', remessaHtml({}, $$('[data-remessa]', frm).length + 2));
+    S.dirty = true; atualizar();
+    const nova = $('#remessas [data-remessa]:last-child');
+    nova.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    $('.seg input', nova).focus({ preventScroll: true });
+  });
+  frm.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rm-rem]');
+    if (!b) return;
+    b.closest('[data-remessa]').remove();
+    S.dirty = true; atualizar();
+  });
+  const cepRemessa = async (inp) => {
+    const b = inp.closest('[data-remessa]'), msg = $('[data-cepmsg]', b), dig = inp.value.replace(/\D/g, '');
+    if (dig.length === 8) inp.value = dig.slice(0, 5) + '-' + dig.slice(5);
+    if (dig.length !== 8 || inp.dataset.ultimo === dig) return;
+    inp.dataset.ultimo = dig;
+    msg.textContent = 'Buscando endereço…';
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${dig}/json/`).then((x) => x.json());
+      if (r.erro) { msg.textContent = 'CEP não encontrado. Preencha à mão.'; return; }
+      const por = (k, v) => { if (v) $(`[data-rk="${k}"]`, b).value = String(v).slice(0, 200); };
+      por('rua', r.logradouro); por('bairro', r.bairro); por('cidade', r.localidade);
+      if (UFS.includes(r.uf)) $('[data-rk="uf"]', b).value = r.uf;
+      msg.textContent = 'Endereço encontrado. Confira e informe o número.';
+      S.dirty = true; atualizar();
+      $('[data-rk="numero"]', b).focus();
+    } catch { msg.textContent = 'Não foi possível buscar o CEP agora. Preencha à mão.'; }
+  };
+  frm.addEventListener('input', (e) => { if (e.target.matches('[data-remessa] [data-rk="cep"]') && e.target.value.replace(/\D/g, '').length === 8) cepRemessa(e.target); });
+  frm.addEventListener('focusout', (e) => { if (e.target.matches('[data-remessa] [data-rk="cep"]')) cepRemessa(e.target); });
   frm.addEventListener('change', atualizar);
   frm.addEventListener('focusin', (e) => { if (e.target.classList.contains('money')) setTimeout(() => e.target.select(), 0); });
   frm.addEventListener('focusout', (e) => {
@@ -2245,6 +2343,8 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
     }
     const dd = f.dados;
     if (dd.entrega?.email && !emailOk(dd.entrega.email)) return erro('en-email', 'E-mail do cliente inválido.');
+    const remRuim = (dd.remessas || []).findIndex((r) => r.email && !emailOk(r.email));
+    if (remRuim >= 0) { toast(`E-mail inválido na remessa ${remRuim + 2}.`, 'err'); return; }
     if (A) {
       dd.servicos = dd.servicos.filter((x) => x.tipo || x.formato || x.responsavel || x.email);
       const ruim = dd.servicos.find((x) => x.email && !emailOk(x.email));
@@ -2356,7 +2456,7 @@ function textoAtividade(a) {
   const d = a.dados || {}, ct = d.contrato || {};
   return `*Atividade Nº ${pad(a.numero)} — ${a.nome}*\n${clienteTexto(clienteDe(a)) ? 'Cliente: ' + clienteTexto(clienteDe(a)) + '\n' : ''}${SIT[a.situacao]?.label} · ${a.tipo}\n${datasAtv(a)}\nSolicitante: ${a.gerente || '—'}\n` +
     ((ct.valor || ct.tipo || ct.data || ct.pagamento) ? `Contrato: ${contratoTxt(ct)} — ${brl(ct.valor)}\n` : '') +
-    (temEntrega(d.entrega) ? `Entrega: ${entregaTexto(d.entrega)}\n` : '') +
+    envios(d).filter(temEntrega).map((en, i, l) => `${l.length > 1 ? `Remessa ${i + 1}` : 'Entrega'}: ${entregaTexto(en)}\n`).join('') +
     (d.servicos || []).map((x) => `• ${[x.tipo, x.formato].filter(Boolean).join(' — ')}${x.responsavel ? ' · Resp.: ' + x.responsavel : ''}${x.email ? ' · Envio: ' + x.email : ''}`).join('\n') +
     (compraTexto(a.valor_total, d.compras) ? `\nRepresenta ${compraTexto(a.valor_total, d.compras)}` : '') + `\n*Valor: ${brl(a.valor_total)}*`;
 }
@@ -2387,7 +2487,7 @@ function fichaAtividade(a) {
       ${bloco('Contrato', contrato, ct.valor ? brl(ct.valor) : '')}
       ${bloco('Compras do cliente', compras)}
       ${bloco('Serviços a realizar', serv)}
-      ${bloco('Endereço de entrega', entregaFicha(d.entrega), entregaValor(d.entrega) ? brl(entregaValor(d.entrega)) : '')}
+      ${envios(d).map((en, i, l) => bloco(l.length > 1 ? `Remessa ${i + 1} · Entrega` : 'Endereço de entrega', entregaFicha(en), entregaValor(en) ? brl(entregaValor(en)) : '')).join('')}
       ${bloco('Observações', d.observacoes ? `<p class="f-obs">${esc(d.observacoes)}</p>` : '')}
     </div>
     <footer class="f-rod"><span id="fichaAnx"></span><span>Cadastrado por ${esc(nomeDe(a.criado_por))} em ${fdia(a.criado_em)} · Impresso em ${fdt(new Date())} por ${esc(S.me?.nome || '')}</span></footer>
@@ -2449,7 +2549,8 @@ async function viewDetalheAtv(id) {
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px"><button class="btn btn-primary" id="xSalvar">${ic('save')}Salvar execução</button>
           <span class="small muted">As fotos do que foi feito vão em <b>Fotos e arquivos</b>, logo abaixo.</span></div>`
         : (ex?.obs ? `<div style="white-space:pre-wrap">${esc(ex.obs)}</div>` : '')}</div>
-      ${cartaoEntrega(d.entrega)}
+      ${cartaoEntrega(d.entrega, remessasDe(d).length ? 'Remessa 1 · Endereço de entrega' : 'Endereço de entrega')}
+      ${remessasDe(d).map((r, i) => cartaoEntrega(r, `Remessa ${i + 2} · Endereço de entrega`, i + 1)).join('')}
       ${d.observacoes ? `<div class="card full"><div class="card-h"><h3>Observações</h3></div><div style="white-space:pre-wrap">${esc(d.observacoes)}</div></div>` : ''}
       <div class="card full" id="anxCard"><div class="card-h"><h3>Fotos e arquivos <span class="muted small" id="anxCount"></span></h3><span class="sp"></span>
         <span class="small muted hidden" id="anxStatus"></span>
@@ -2460,10 +2561,7 @@ async function viewDetalheAtv(id) {
 
   $('#dPrint').onclick = () => window.print();
   $('#dWa').onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(textoAtividade(a)), '_blank', 'noopener');
-  $('#enCopiar')?.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(entregaTexto(d.entrega)); toast('Endereço copiado'); }
-    catch { toast('Não foi possível copiar', 'err'); }
-  });
+  ligarCopiar(envios(d));
   $('#dImg').onclick = (x) => enviarFicha('imagem', x.currentTarget, a, 'atividade');
   $('#dPdf').onclick = (x) => enviarFicha('pdf', x.currentTarget, a, 'atividade');
   $('#dDel')?.addEventListener('click', () => excluirEvento(a, () => { location.hash = '#/atividades'; }, 'atividade'));
@@ -2818,7 +2916,7 @@ async function viewRelAtividades() {
       return `<div class="rep-ev"><div class="h"><span class="seq">Nº ${pad(a.numero)}</span><b>${esc(a.nome)}</b>${clienteTexto(clienteDe(a)) ? `<span class="tag">${esc(clienteTexto(clienteDe(a)))}</span>` : ''}${pill(a.situacao)}<span class="sp"></span><span class="v">${brl(a.valor_total)}</span></div>
       <div class="i">${esc(a.tipo)} · ${datasAtv(a)} · Solicitante: ${esc(a.gerente || '—')}${(ct.tipo || ct.pagamento) ? ' · Contrato: ' + esc(contratoTxt(ct)) : ''}</div>
       ${(d.servicos || []).length ? `<table class="mini"><tbody>${d.servicos.map((x) => `<tr><td style="width:120px"><b>${esc(x.tipo || 'Serviço')}</b></td><td>${esc(x.formato || '')}</td><td>${esc(x.responsavel ? 'Resp.: ' + x.responsavel : '')}</td><td>${esc(x.email || '')}</td></tr>`).join('')}</tbody></table>` : ''}
-      ${temEntrega(d.entrega) ? `<div class="i"><b>Entrega:</b> ${esc(entregaTexto(d.entrega))}</div>` : ''}
+      ${envios(d).filter(temEntrega).map((en, i, l) => `<div class="i"><b>${l.length > 1 ? `Remessa ${i + 1}` : 'Entrega'}:</b> ${esc(entregaTexto(en))}</div>`).join('')}
       <div class="i"><b>Execução:</b> ${ex?.conclusao ? `concluída em ${fdate(ex.conclusao)}${ex.por ? ' (registrado por ' + esc(ex.por) + ')' : ''}` : 'ainda não concluída'}${ex?.obs ? ' — ' + esc(ex.obs) : ''}${a.realizado ? ' · <b>realizada</b>' : ''}</div></div>`; };
 
     $('#rOut').innerHTML = `<div class="card report">
@@ -3113,8 +3211,8 @@ function exportarCsvAtv(lista) {
   lista.map((a) => { const ct = a.dados?.contrato || {}, ex = execDe(a) || {};
     return [pad(a.numero), SIT[a.situacao]?.label, a.realizado ? 'Sim' : 'Não', a.tipo, a.nome, clienteDe(a).codigo || '', clienteDe(a).nome || '', a.gerente, fdate(a.data_inicio), fdate(a.data_fim),
       (a.dados?.servicos || []).map((x) => [x.tipo, x.formato].filter(Boolean).join(' — ')).join(' | '), responsaveisDe(a).join(', '),
-      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(ct.valor), n(comFrete(a.dados?.entrega) ? a.dados.entrega.frete : 0), n(mercDe(a.dados?.entrega)), n(a.valor_total),
-      enderecoTexto(a.dados?.entrega || {}), envioTexto(a.dados?.entrega || {}), nomeDe(a.criado_por)]; }), 'atividades-dello');
+      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(ct.valor), n(soma(envios(a.dados), (x) => comFrete(x) ? x.frete : 0)), n(soma(envios(a.dados), mercDe)), n(a.valor_total),
+      envios(a.dados).filter(temEntrega).map(enderecoTexto).join(' | '), envios(a.dados).map(envioTexto).filter(Boolean).join(' | '), nomeDe(a.criado_por)]; }), 'atividades-dello');
 }
 
 function exportarCsv(lista) {

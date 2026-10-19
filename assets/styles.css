@@ -1145,3 +1145,10 @@ table.mini td.c .sit-dot { margin-right: 0; width: 13px; height: 13px; }
   .sol-head h1 { font-size: 19px; }
   .sol-seg, .sol-seg[data-grupo="retorna"] { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- remessas extras (atividades) ---------- */
+.rem-h { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rem-n { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 99px; background: var(--brand-50); color: var(--brand-700); font-size: 12.5px; font-weight: 800; letter-spacing: .02em; }
+.remessa { margin-top: 18px; padding: 16px; border: 1.5px dashed var(--warm-border); border-radius: 14px; background: var(--surface-2); }
+.remessa .envio-campos { margin-top: 12px; }
+#addRem { margin-top: 16px; }
