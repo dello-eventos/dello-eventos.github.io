@@ -1152,3 +1152,7 @@ table.mini td.c .sit-dot { margin-right: 0; width: 13px; height: 13px; }
 .remessa { margin-top: 18px; padding: 16px; border: 1.5px dashed var(--warm-border); border-radius: 14px; background: var(--surface-2); }
 .remessa .envio-campos { margin-top: 12px; }
 #addRem { margin-top: 16px; }
+
+/* formulário público: endereço opcional quando for "Nosso carro" */
+.sol-end-nota { margin: -6px 0 14px; }
+.end-opc .req-end { display: none; }

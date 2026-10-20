@@ -26,6 +26,7 @@
   const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
 
   const campo = (id, rotulo, extra = '', cls = '') => `<div class="field ${cls}"><label for="${id}">${rotulo} <span class="req">*</span></label><input id="${id}" ${extra}></div>`;
+  const campoEnd = (id, rotulo, extra = '', cls = '') => campo(id, rotulo, extra, cls).replace('<span class="req">*</span>', '<span class="req req-end">*</span>');
   const opcoes = (nome, lista) => `<div class="seg sol-seg" data-grupo="${nome}">${lista.map(([v, l, s]) => `<label><input type="radio" name="${nome}" value="${v}"><span><b>${l}</b>${s ? `<small>${s}</small>` : ''}</span></label>`).join('')}</div>`;
   const linhaItem = () => `<tr data-item>
     <td class="q"><input type="number" min="1" step="1" inputmode="numeric" data-k="qtd" placeholder="0" aria-label="Quantidade"></td>
@@ -46,18 +47,7 @@
           ${campo('s-contato', 'Seu e-mail ou WhatsApp', 'maxlength="150" autocomplete="email" placeholder="Para falarmos com você"', 'span2')}
         </div></section>
 
-      <section class="card"><h2 class="sol-h">2. Endereço de entrega</h2>
-        <div class="grid g4">
-          <div class="field"><label for="s-cep">CEP <span class="req">*</span></label><input id="s-cep" inputmode="numeric" maxlength="9" placeholder="00000-000" autocomplete="postal-code"><div class="hint" id="cepMsg">Preenche o endereço sozinho</div></div>
-          ${campo('s-rua', 'Rua / avenida', 'maxlength="200" autocomplete="address-line1"', 'span2')}
-          ${campo('s-num', 'Número', 'maxlength="20"')}
-          <div class="field"><label for="s-comp">Complemento</label><input id="s-comp" maxlength="120" placeholder="Opcional"></div>
-          ${campo('s-bairro', 'Bairro', 'maxlength="100"')}
-          ${campo('s-cidade', 'Cidade', 'maxlength="100" autocomplete="address-level2"')}
-          <div class="field"><label for="s-uf">Estado <span class="req">*</span></label><select id="s-uf"><option value=""></option>${UFS.map((u) => `<option>${u}</option>`).join('')}</select></div>
-        </div></section>
-
-      <section class="card"><h2 class="sol-h">3. Solicitação</h2>
+      <section class="card"><h2 class="sol-h">2. Solicitação</h2>
         <div class="lbl">Tipo <span class="req">*</span></div>${opcoes('tipo', [['Kit', 'Kit'], ['Amostra', 'Amostra'], ['Brinde', 'Brinde']])}
         <div class="grid g3" style="margin-top:14px">
           ${campo('s-evento', 'Evento', 'maxlength="150" placeholder="Feira, visita, treinamento…"')}
@@ -67,6 +57,18 @@
         <div class="lbl" style="margin-top:14px">Forma de entrega <span class="req">*</span></div>${opcoes('entrega', [['proprio', 'Nosso carro'], ['transportadora', 'Transportadora'], ['correio', 'Correio']])}
         <div class="lbl" style="margin-top:14px">O material retorna? <span class="req">*</span></div>${opcoes('retorna', [['Sim', 'Sim', 'Volta para a Dello'], ['Não', 'Não', 'Fica com o cliente']])}
       </section>
+
+      <section class="card end-opc" id="secEnd"><h2 class="sol-h">3. Endereço de entrega</h2>
+        <p class="hint sol-end-nota" id="endNota">Obrigatório quando a forma de entrega for <b>Transportadora</b> ou <b>Correio</b>. Para <b>Nosso carro</b>, preencha se quiser.</p>
+        <div class="grid g4">
+          <div class="field"><label for="s-cep">CEP <span class="req req-end">*</span></label><input id="s-cep" inputmode="numeric" maxlength="9" placeholder="00000-000" autocomplete="postal-code"><div class="hint" id="cepMsg">Preenche o endereço sozinho</div></div>
+          ${campoEnd('s-rua', 'Rua / avenida', 'maxlength="200" autocomplete="address-line1"', 'span2')}
+          ${campoEnd('s-num', 'Número', 'maxlength="20"')}
+          <div class="field"><label for="s-comp">Complemento</label><input id="s-comp" maxlength="120" placeholder="Opcional"></div>
+          ${campoEnd('s-bairro', 'Bairro', 'maxlength="100"')}
+          ${campoEnd('s-cidade', 'Cidade', 'maxlength="100" autocomplete="address-level2"')}
+          <div class="field"><label for="s-uf">Estado <span class="req req-end">*</span></label><select id="s-uf"><option value=""></option>${UFS.map((u) => `<option>${u}</option>`).join('')}</select></div>
+        </div></section>
 
       <section class="card"><h2 class="sol-h">4. Itens</h2>
         <div class="sol-itens"><table class="items" id="itens"><thead><tr><th>Qtd. *</th><th>Cód. prod. *</th><th>Descrição *</th><th>Observação</th><th></th></tr></thead>
@@ -85,6 +87,11 @@
     });
     frm.addEventListener('change', (e) => {
       if (e.target.type === 'radio') $$(`[data-grupo="${e.target.name}"] label`).forEach((l) => l.classList.toggle('on', $('input', l).checked));
+      if (e.target.name === 'entrega') {
+        const obrig = e.target.value === 'transportadora' || e.target.value === 'correio';
+        $('#secEnd').classList.toggle('end-opc', !obrig);
+        if (!obrig) $$('#secEnd .invalid').forEach((x) => x.classList.remove('invalid'));
+      }
     });
     frm.addEventListener('input', (e) => e.target.classList.remove('invalid'));
 
@@ -117,11 +124,14 @@
       const radio = (nome, rotulo) => { const r = $(`input[name="${nome}"]:checked`); if (!r) { $(`[data-grupo="${nome}"]`).classList.add('invalid'); erros.push(rotulo); } return r ? r.value : ''; };
       const data = (id, nome) => { const v = val(id, nome); if (v && !/^(19|20)\d\d-\d\d-\d\d$/.test(v)) { $(id).classList.add('invalid'); erros.push(nome + ' (ano com 4 dígitos)'); } return v; };
 
+      const formaSel = $('input[name="entrega"]:checked')?.value || '';
+      const endObrig = formaSel === 'transportadora' || formaSel === 'correio';
+      const end = (id, nome) => endObrig ? val(id, nome) : $(id).value.trim();
       const d = {
         cliente_codigo: val('#s-cod', 'Cód. cliente'), cliente_nome: val('#s-nome', 'Nome do cliente'),
         solicitante: val('#s-solic', 'Solicitante'), contato: val('#s-contato', 'Seu e-mail ou WhatsApp'),
-        cep: val('#s-cep', 'CEP'), rua: val('#s-rua', 'Rua'), numero: val('#s-num', 'Número'), complemento: $('#s-comp').value.trim(),
-        bairro: val('#s-bairro', 'Bairro'), cidade: val('#s-cidade', 'Cidade'), uf: val('#s-uf', 'Estado'),
+        cep: end('#s-cep', 'CEP'), rua: end('#s-rua', 'Rua'), numero: end('#s-num', 'Número'), complemento: $('#s-comp').value.trim(),
+        bairro: end('#s-bairro', 'Bairro'), cidade: end('#s-cidade', 'Cidade'), uf: end('#s-uf', 'Estado'),
         tipo: radio('tipo', 'Tipo'), evento: val('#s-evento', 'Evento'),
         data_evento: data('#s-devento', 'Data do evento'), prazo_entrega: data('#s-prazo', 'Prazo de entrega'),
         forma_entrega: radio('entrega', 'Forma de entrega'), material_retorna: radio('retorna', 'Material retorna'),
