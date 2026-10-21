@@ -1156,3 +1156,28 @@ table.mini td.c .sit-dot { margin-right: 0; width: 13px; height: 13px; }
 /* formulário público: endereço opcional quando for "Nosso carro" */
 .sol-end-nota { margin: -6px 0 14px; }
 .end-opc .req-end { display: none; }
+
+/* ---------- envio de material (atividades) ---------- */
+form.envio-mat .merc-campo { display: none !important; }
+.mat-busca { margin-bottom: 14px; padding: 14px; border-radius: 12px; background: var(--brand-50); border: 1px dashed var(--warm-border); }
+.mat-busca .field { margin: 0; }
+.mat-busca-l { display: flex; gap: 8px; max-width: 420px; }
+.mat-busca-l input { flex: 1; min-width: 0; }
+.mat-itens td.q { width: 90px; }
+.mat-itens td.c { width: 130px; }
+.mat-itens td.o { width: 20%; }
+.mat-itens td.v { width: 150px; }
+.mat-itens td.t, .mat-itens th.t { width: 110px; text-align: right; }
+.mat-itens tfoot td { padding-top: 10px; }
+.mat-itens td.r { text-align: right; }
+.mat-itens input { min-width: 70px; }
+.mat-itens { min-width: 640px; table-layout: fixed; }
+.mat-itens th:nth-child(1), .mat-itens td.q { width: 62px; }
+.mat-itens th:nth-child(2), .mat-itens td.c { width: 88px; }
+.mat-itens th:nth-child(4), .mat-itens td.o { width: 15%; }
+.mat-itens th:nth-child(5), .mat-itens td.v { width: 118px; }
+.mat-itens th:nth-child(6), .mat-itens td.t { width: 92px; }
+.mat-itens th:nth-child(7), .mat-itens td.x { width: 36px; }
+.mat-itens input { min-width: 0 !important; width: 100%; }
+.mat-itens .prefix span { padding: 0 6px; }
+.mat-itens th { font-size: 11px; }

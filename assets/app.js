@@ -275,7 +275,13 @@ function subtotais(d = {}) {
 }
 const remessasDe = (d) => (Array.isArray(d?.remessas) ? d.remessas : []).filter((r) => r && typeof r === 'object' && !Array.isArray(r));
 const envios = (d) => [d?.entrega || {}, ...remessasDe(d)];   // entrega principal + remessas extras
-const totalAtv = (d) => Math.round((Math.max(0, Number(d?.contrato?.valor) || 0) + soma(envios(d), entregaValor)) * 100) / 100;
+// Envio de material: o valor vem dos itens (qtd × unitário) + fretes; a "mercadoria" da entrega não conta
+const ehEnvioMat = (d) => d?.envio_material === true;
+const itensMat = (d) => (Array.isArray(d?.material?.itens) ? d.material.itens : []).filter((i) => i && typeof i === 'object');
+const freteDe = (en) => comFrete(en) ? Math.max(0, Number(en.frete) || 0) : 0;
+const totalAtv = (d) => Math.round((ehEnvioMat(d)
+  ? soma(itensMat(d), (i) => Math.max(0, Number(i.valor) || 0)) + soma(envios(d), freteDe)
+  : Math.max(0, Number(d?.contrato?.valor) || 0) + soma(envios(d), entregaValor)) * 100) / 100;
 const totalDe = (d) => Math.round(soma(Object.values(subtotais(d))) * 100) / 100;
 
 // Garante o formato esperado dos dados vindos do banco (proteção contra registros malformados)
@@ -285,6 +291,7 @@ function sanearAtv(a) {
   const d = obj(a.dados);
   a.dados = {
     ...d, cliente: obj(d.cliente), contrato: obj(d.contrato), entrega: obj(d.entrega), remessas: remessasDe(d), compras: comprasDe(d),
+    envio_material: d.envio_material === true, material: { ...obj(d.material), itens: itensMat(d) },
     servicos: Array.isArray(d.servicos) ? d.servicos.filter((i) => i && typeof i === 'object' && !Array.isArray(i)) : [],
     observacoes: typeof d.observacoes === 'string' ? d.observacoes : '',
   };
@@ -469,6 +476,7 @@ function SupaAPI() {
       return a + b;
     },
     async listSolicitacoes() { return chk(await sb.from('solicitacoes').select('*').order('criado_em', { ascending: false }).limit(500)); },
+    async solicitacaoNumero(n) { return chk(await sb.from('solicitacoes').select('*').eq('numero', n).maybeSingle()); },
     async marcarSolicitacao(id, status, atividadeId) {
       const patch = { status };
       if (atividadeId !== undefined) patch.atividade_id = atividadeId;
@@ -734,6 +742,7 @@ function DemoAPI() {
         itens: [{ qtd: 10, cod: 'DL-501', descricao: 'Organizador multiuso 5 L', obs: '' }, { qtd: 5, cod: 'DL-220', descricao: 'Caixa organizadora 20 L', obs: 'cor azul' }] } }];
       return clone(db.solicitacoes);
     },
+    async solicitacaoNumero(n) { if (!isAdmin()) return null; return clone((await this.listSolicitacoes()).find((x) => +x.numero === +n) || null); },
     async marcarSolicitacao(id, status, atividadeId) {
       if (!isAdmin()) negar();
       const x = (db.solicitacoes || []).find((o) => o.id === id);
@@ -1750,6 +1759,8 @@ function normalizarAtv(d = {}) {
     cliente: { codigo: '', nome: '', ...(d.cliente || {}) },
     compras: comprasDe(d),
     contrato: { data: '', tipo: '', pagamento: '', valor: '', ...(d.contrato || {}) },
+    envio_material: d.envio_material === true,
+    material: { solicitacao: '', tipo: '', evento: '', data_evento: '', retorna: '', ...(d.material || {}), itens: itensMat(d) },
     entrega: { destinatario: '', telefone: '', email: '', cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', data: '', horario: '', obs: '',
       modo: '', motorista: '', transportadora: '', coleta: '', rastreio: '', frete: '', mercadoria: '', ...(d.entrega || {}) },
     remessas: remessasDe(d),
@@ -1777,6 +1788,24 @@ function repHtml(tipo, obj = {}, n = 1) {
     <div class="rep-grid">${cfg.campos.map((c) => campoRep(c, obj[c.k])).join('')}</div></div>`;
 }
 // Remessa extra: mesmos campos da entrega, sem ids (lidos por data-rk)
+// Item do envio de material: quantidade, código, descrição, observação, valor unitário e total
+const matItemHtml = (i = {}) => `<tr data-mi>
+  <td class="q"><input type="number" min="0" step="1" inputmode="numeric" data-mk="qtd" value="${esc(i.qtd ?? '')}" placeholder="0" aria-label="Quantidade"></td>
+  <td class="c"><input data-mk="cod" value="${esc(i.cod)}" maxlength="40" placeholder="Código" aria-label="Código do produto"></td>
+  <td class="d"><input data-mk="descricao" value="${esc(i.descricao)}" maxlength="300" placeholder="Descrição do produto" aria-label="Descrição"></td>
+  <td class="o"><input data-mk="obs" value="${esc(i.obs)}" maxlength="300" placeholder="Observação" aria-label="Observação"></td>
+  <td class="v"><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-mk="unit" value="${fmtNum(i.unit)}" placeholder="0,00" aria-label="Valor unitário"></div></td>
+  <td class="t num" data-mtot>—</td>
+  <td class="x"><button type="button" class="btn btn-ghost icon-btn" data-rm-mi title="Remover" aria-label="Remover">${ic('x')}</button></td></tr>`;
+function lerItensMat(box) {
+  return $$('[data-mi]', box).map((tr) => {
+    const g = (k) => ($(`[data-mk="${k}"]`, tr)?.value || '').trim();
+    const qt = g('qtd') === '' ? '' : Math.min(999999, Math.max(0, Math.round(Number(g('qtd'))) || 0));
+    const unit = parseMoney(g('unit'));
+    return { qtd: qt, cod: g('cod'), descricao: g('descricao'), obs: g('obs'), unit, valor: unit ? totalItem(unit, qt) : 0 };
+  }).filter((i) => i.qtd || i.cod || i.descricao || i.obs || i.unit);
+}
+
 function remessaHtml(r = {}, n = 2) {
   const k = 'rem-' + Math.random().toString(36).slice(2, 9);
   const f = (rk, l, extra = '', cls = '', val = r[rk]) => `<div class="field ${cls}"><label>${l}</label><input data-rk="${rk}" value="${esc(val)}" ${extra}></div>`;
@@ -1791,7 +1820,7 @@ function remessaHtml(r = {}, n = 2) {
       <div class="field" data-envio="transportadora"><label>Dia da coleta</label><input type="date" data-rk="coleta" value="${esc(r.coleta)}"></div>
       <div class="field span2" data-envio="correio"><label>Número de rastreio</label><input data-rk="rastreio" value="${esc(r.rastreio)}" maxlength="60" placeholder="Ex.: AB123456789BR" style="text-transform:uppercase"></div>
       <div class="field" data-envio="transportadora correio"><label>Valor do frete</label><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-rk="frete" value="${fmtNum(r.frete)}" placeholder="0,00"></div><div class="hint">Entra no total da atividade</div></div>
-      <div class="field" data-envio="proprio transportadora correio"><label>Valor da mercadoria</label><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-rk="mercadoria" value="${fmtNum(r.mercadoria)}" placeholder="0,00"></div><div class="hint">Entra no total da atividade</div></div>
+      <div class="field merc-campo" data-envio="proprio transportadora correio"><label>Valor da mercadoria</label><div class="prefix"><span>R$</span><input class="money" inputmode="decimal" data-rk="mercadoria" value="${fmtNum(r.mercadoria)}" placeholder="0,00"></div><div class="hint">Entra no total da atividade</div></div>
     </div>
     <div class="grid g4">
       ${f('destinatario', 'Quem recebe', 'maxlength="120" placeholder="Nome do responsável pelo recebimento"')}
@@ -1863,7 +1892,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   // clientes já usados (código → nome), em eventos e atividades
   const clientesAnt = [];
   [...S.eventos, ...S.atividades].forEach((e) => { const c = clienteDe(e); if (c.codigo && !clientesAnt.some((x) => x.codigo === c.codigo)) clientesAnt.push({ codigo: String(c.codigo), nome: String(c.nome || '') }); });
-  const cats = A ? [['contrato', 'Contrato'], ['frete', 'Frete da entrega'], ['mercadoria', 'Mercadoria enviada']] : CATS;
+  const cats = A ? [['contrato', 'Contrato'], ['material', 'Itens do envio'], ['frete', 'Frete da entrega'], ['mercadoria', 'Mercadoria enviada']] : CATS;
   const voltar = novo ? '#/' + K.rota : `#/${K.rota}/${ev.id}`;
 
   setPage(novo ? (duplicar ? `Duplicar ${K.sing}` : K.nova) : `Editar ${K.sing} Nº ${pad(ev.numero)}`,
@@ -1934,7 +1963,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
           <div class="field" data-envio="transportadora"><label for="f-en-coleta">Dia da coleta</label><input id="f-en-coleta" type="date" value="${esc(d.entrega?.coleta)}"></div>
           <div class="field span2" data-envio="correio"><label for="f-en-rastreio">Número de rastreio</label><input id="f-en-rastreio" value="${esc(d.entrega?.rastreio)}" maxlength="60" placeholder="Ex.: AB123456789BR" style="text-transform:uppercase"></div>
           <div class="field" data-envio="transportadora correio"><label for="f-en-frete">Valor do frete</label><div class="prefix"><span>R$</span><input id="f-en-frete" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.frete)}" placeholder="0,00"></div><div class="hint">Entra no total d${K.o} ${K.sing}</div></div>
-          <div class="field" data-envio="proprio transportadora correio"><label for="f-en-merc">Valor da mercadoria</label><div class="prefix"><span>R$</span><input id="f-en-merc" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.mercadoria)}" placeholder="0,00"></div><div class="hint">Entra no total d${K.o} ${K.sing}</div></div>
+          <div class="field merc-campo" data-envio="proprio transportadora correio"><label for="f-en-merc">Valor da mercadoria</label><div class="prefix"><span>R$</span><input id="f-en-merc" class="money" inputmode="decimal" value="${fmtNum(d.entrega?.mercadoria)}" placeholder="0,00"></div><div class="hint">Entra no total d${K.o} ${K.sing}</div></div>
         </div>
         <div class="grid g4">
           <div class="field"><label for="f-en-dest">Quem recebe</label><input id="f-en-dest" value="${esc(d.entrega?.destinatario)}" maxlength="120" placeholder="Nome do responsável pelo recebimento"></div>
@@ -2009,14 +2038,39 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       ${secObs(10)}
       ${secArq(11)}`;
 
+  const mat = d.material || {};
   const secoesAtividade = `
-      <section class="card">
-        ${secH(2, 'Contrato', 'Aprovação, forma de pagamento e valor da atividade', 'contrato')}
-        <div class="grid g4">
+      <section class="card" id="secContrato">
+        ${secH(2, 'Contrato ou envio de material', 'Escolha se esta atividade tem contrato ou se é um envio de kits, amostras e brindes', 'contrato')}
+        <div class="lbl">Esta atividade é envio de material?</div>
+        <div class="seg seg2" id="segMat" style="margin-bottom:18px">
+          <label class="vis ${d.envio_material ? '' : 'on'}"><input type="radio" name="envmat" value="nao" ${d.envio_material ? '' : 'checked'}>${ic('file')}<span><b>Não · Contrato</b><small>Aprovação, forma de pagamento e valor</small></span></label>
+          <label class="vis ${d.envio_material ? 'on' : ''}"><input type="radio" name="envmat" value="sim" ${d.envio_material ? 'checked' : ''}>${ic('box')}<span><b>Sim · Envio de material</b><small>Kits, amostras e brindes, com itens e valores</small></span></label>
+        </div>
+        <div id="blocoContrato" class="${d.envio_material ? 'hidden' : ''}"><div class="grid g4">
           <div class="field"><label for="f-ct-data">Data de aprovação</label><input id="f-ct-data" type="date" value="${esc(d.contrato?.data)}"></div>
           <div class="field"><label for="f-ct-tipo">Tipo</label><input id="f-ct-tipo" value="${esc(d.contrato?.tipo)}" maxlength="120" placeholder="Ex.: veiculação, produção, impressão…"></div>
           <div class="field"><label for="f-ct-pag">Forma de pagamento</label><input id="f-ct-pag" value="${esc(d.contrato?.pagamento)}" maxlength="120" placeholder="Escolha ou escreva" list="dl-pag"></div>
           <div class="field"><label for="f-ct-valor">Valor</label><div class="prefix"><span>R$</span><input id="f-ct-valor" class="money" inputmode="decimal" value="${fmtNum(d.contrato?.valor)}" placeholder="0,00"></div></div>
+        </div></div>
+        <div id="blocoMat" class="${d.envio_material ? '' : 'hidden'}">
+          <div class="mat-busca">
+            <div class="field"><label for="f-mt-num">Nº da solicitação (formulário do link)</label>
+              <div class="mat-busca-l"><input id="f-mt-num" inputmode="numeric" maxlength="8" placeholder="Ex.: 12" value="${esc(mat.solicitacao)}"><button type="button" class="btn" id="mtBuscar">${ic('search')}Buscar</button></div>
+              <div class="hint" id="mtMsg">${isAdmin() ? 'Puxa cliente, endereço, prazo e itens da solicitação. Se não tiver, preencha à mão.' : 'Só administradores buscam solicitações. Preencha os itens à mão.'}</div></div>
+          </div>
+          <div class="grid g4">
+            <div class="field"><label for="f-mt-tipo">Tipo</label><select id="f-mt-tipo"><option value=""></option>${['Kit', 'Amostra', 'Brinde'].map((t) => `<option ${mat.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+            <div class="field"><label for="f-mt-evento">Evento</label><input id="f-mt-evento" value="${esc(mat.evento)}" maxlength="150" placeholder="Feira, visita…"></div>
+            <div class="field"><label for="f-mt-devento">Data do evento</label><input id="f-mt-devento" type="date" value="${esc(mat.data_evento)}"></div>
+            <div class="field"><label for="f-mt-ret">Material retorna?</label><select id="f-mt-ret"><option value=""></option>${['Sim', 'Não'].map((t) => `<option ${mat.retorna === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+          </div>
+          <div class="sub-h">Itens</div>
+          <div style="overflow-x:auto"><table class="items mat-itens"><thead><tr><th>Qtd.</th><th>Cód. prod.</th><th>Descrição</th><th class="o">Observação</th><th>Valor unitário</th><th class="t">Total</th><th></th></tr></thead>
+            <tbody id="mtItens">${(mat.itens?.length ? mat.itens : [{}, {}]).map(matItemHtml).join('')}</tbody>
+            <tfoot><tr><td colspan="5" class="r"><b>Total dos itens</b></td><td class="t num"><b id="mtTot">R$ 0,00</b></td><td></td></tr></tfoot></table></div>
+          <button type="button" class="btn add-row" id="mtAdd">${ic('plus')}Adicionar item</button>
+          <div class="kbd-hint">${ic('info')}<span>O total dos itens entra no valor da atividade, junto com o frete. O campo "Valor da mercadoria" da entrega some, para não contar duas vezes.</span></div>
         </div>
       </section>
 
@@ -2097,10 +2151,16 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
       mercadoria: modo ? parseMoney(v('en-merc')) : '',
     };
     if (A) {
-      return { ...comum, dados: { ...extra,
-        cliente, compras, entrega, remessas: $$('[data-remessa]', frm).map(lerRemessa).filter(temEntrega), contrato: { data: v('ct-data'), tipo: v('ct-tipo'), pagamento: v('ct-pag'), valor: parseMoney(v('ct-valor')) },
+      const r = { ...comum, dados: { ...extra,
+        cliente, compras, entrega, remessas: $$('[data-remessa]', frm).map(lerRemessa).filter(temEntrega),
+        envio_material: $('input[name=envmat]:checked', frm)?.value === 'sim',
+        material: { solicitacao: v('mt-num'), solicitacao_id: solicOrigem?.id || ev.dados?.material?.solicitacao_id || '', tipo: v('mt-tipo'), evento: v('mt-evento'),
+          data_evento: v('mt-devento'), retorna: v('mt-ret'), itens: lerItensMat($('#mtItens')) },
+        contrato: { data: v('ct-data'), tipo: v('ct-tipo'), pagamento: v('ct-pag'), valor: parseMoney(v('ct-valor')) },
         servicos: linhas('servicosAtv').map((x) => ({ ...x, email: (x.email || '').toLowerCase() })), observacoes: $('#f-obs').value.trim(),
       } };
+      if (r.dados.envio_material) { r.dados.entrega.mercadoria = ''; r.dados.remessas.forEach((x) => { x.mercadoria = ''; }); }
+      return r;
     }
     const area = v('ce-area');
     return { ...comum, local: v('local'), dados: { ...extra,
@@ -2115,8 +2175,20 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
 
   const atualizar = () => {
     const f = ler();
-    const st = A ? { contrato: Math.max(0, Number(f.dados.contrato.valor) || 0),
-      frete: soma(envios(f.dados), (x) => comFrete(x) ? Math.max(0, Number(x.frete) || 0) : 0), mercadoria: soma(envios(f.dados), mercDe) } : subtotais(f.dados);
+    const em = A && f.dados.envio_material;
+    const st = A ? { contrato: em ? 0 : Math.max(0, Number(f.dados.contrato.valor) || 0), material: em ? soma(itensMat(f.dados), (i) => i.valor) : 0,
+      frete: soma(envios(f.dados), freteDe), mercadoria: em ? 0 : soma(envios(f.dados), mercDe) } : subtotais(f.dados);
+    if (A) {
+      frm.classList.toggle('envio-mat', em);
+      $('#blocoContrato').classList.toggle('hidden', em); $('#blocoMat').classList.toggle('hidden', !em);
+      $$('#segMat label').forEach((l) => l.classList.toggle('on', $('input', l).checked));
+      $$('#mtItens [data-mi]').forEach((tr) => {
+        const q = $('[data-mk=qtd]', tr).value, u = parseMoney($('[data-mk=unit]', tr).value);
+        $('[data-mtot]', tr).textContent = u ? brl(totalItem(u, q === '' ? '' : Number(q))) : '—';
+      });
+      $('#mtTot').textContent = brl(st.material);
+      const sc = $('#st-contrato'); if (sc) sc.textContent = em ? (st.material ? brl(st.material) : '') : (st.contrato ? brl(st.contrato) : '');
+    }
     const tot = A ? totalAtv(f.dados) : totalDe(f.dados);
     $('#rs-nome').textContent = f.nome || `${K.Sing} sem nome`;
     $('#rs-sit').innerHTML = pill(f.situacao) + ` <span class="tag">${esc(f.tipo)}</span>`;
@@ -2161,6 +2233,49 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
   atualizar();
 
   frm.addEventListener('input', () => { S.dirty = true; atualizar(); });
+  $('#mtAdd')?.addEventListener('click', () => {
+    $('#mtItens').insertAdjacentHTML('beforeend', matItemHtml());
+    $('#mtItens tr:last-child input').focus(); S.dirty = true; atualizar();
+  });
+  frm.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rm-mi]');
+    if (!b) return;
+    const tb = $('#mtItens');
+    if (tb.children.length > 1) b.closest('tr').remove(); else $$('input', b.closest('tr')).forEach((i) => { i.value = ''; });
+    S.dirty = true; atualizar();
+  });
+  const preencherDaSolic = (x) => {
+    const r = atividadeDaSolic(x), dd = r.dados, put = (id, val) => { const el = $('#f-' + id); if (el && val !== undefined && val !== null && val !== '') el.value = val; };
+    if (!v('nome')) put('nome', r.nome);
+    put('cli-cod', dd.cliente.codigo); put('cli-nome', dd.cliente.nome); put('gerente', r.gerente);
+    if (!v('inicio')) put('inicio', r.data_inicio);
+    put('fim', r.data_fim);
+    const tipoSel = $('#f-tipo'); if (tipoSel && [...tipoSel.options].some((o) => o.value === r.tipo)) tipoSel.value = r.tipo;
+    const en = dd.entrega;
+    put('en-cep', en.cep); put('en-rua', en.rua); put('en-num', en.numero); put('en-comp', en.complemento); put('en-bairro', en.bairro);
+    put('en-cidade', en.cidade); put('en-uf', en.uf); put('en-data', en.data); put('en-email', en.email); put('en-tel', en.telefone);
+    const radio = $(`input[name=envio][value="${en.modo}"]`, frm); if (radio) radio.checked = true;
+    const m = dd.material;
+    put('mt-num', m.solicitacao); put('mt-tipo', m.tipo); put('mt-evento', m.evento); put('mt-devento', m.data_evento); put('mt-ret', m.retorna);
+    $('#mtItens').innerHTML = m.itens.map(matItemHtml).join('') || matItemHtml();
+    solicOrigem = { id: x.id, numero: x.numero };
+    S.dirty = true; atualizar();
+  };
+  $('#mtBuscar')?.addEventListener('click', async () => {
+    const n = parseInt(v('mt-num').replace(/\D/g, ''), 10), msg = $('#mtMsg');
+    if (!n) { toast('Digite o número da solicitação.', 'err'); $('#f-mt-num').focus(); return; }
+    if (!isAdmin()) { toast('Só administradores podem buscar solicitações. Preencha os itens à mão.', 'err'); return; }
+    msg.textContent = 'Buscando…';
+    try {
+      const x = await api.solicitacaoNumero(n);
+      if (!x) { msg.textContent = `Solicitação Nº ${pad(n)} não encontrada. Confira o número ou preencha à mão.`; return; }
+      if (x.status === 'lancada' && x.atividade_id !== ev.id && !(await confirmar(`Solicitação Nº ${pad(n)} já foi lançada`, 'Ela já virou outra atividade. Quer puxar os dados mesmo assim?', { icon: 'box', ok: 'Puxar mesmo assim' }))) { msg.textContent = 'Busca cancelada.'; return; }
+      if (lerItensMat($('#mtItens')).length && !(await confirmar('Trocar os itens?', 'Os itens que você já digitou serão trocados pelos da solicitação.', { icon: 'box', ok: 'Trocar itens' }))) { msg.textContent = 'Busca cancelada.'; return; }
+      preencherDaSolic(x);
+      msg.textContent = `Solicitação Nº ${pad(n)} carregada: ${x.dados?.cliente_nome || ''}, ${(x.dados?.itens || []).length} item(ns). Agora coloque o valor unitário de cada item.`;
+      toast('Dados da solicitação carregados');
+    } catch (y) { msg.textContent = msgErro(y); }
+  });
   $('#addRem')?.addEventListener('click', () => {
     $('#remessas').insertAdjacentHTML('beforeend', remessaHtml({}, $$('[data-remessa]', frm).length + 2));
     S.dirty = true; atualizar();
@@ -2376,7 +2491,7 @@ async function viewForm(id, duplicar = false, kind = 'evento') {
         pendentes.forEach((p) => p.url && URL.revokeObjectURL(p.url));
       }
       const extra = enviados ? ` com ${enviados} arquivo${enviados > 1 ? 's' : ''}` : '';
-      if (solicOrigem && novo) { try { await api.marcarSolicitacao(solicOrigem.id, 'lancada', salvo.id); atualizarConferir(true); } catch { toast('Atividade salva, mas não foi possível marcar a solicitação como lançada.', 'err'); } }
+      if (solicOrigem && (novo || solicOrigem.id !== ev.dados?.material?.solicitacao_id)) { try { await api.marcarSolicitacao(solicOrigem.id, 'lancada', salvo.id); atualizarConferir(true); } catch { toast('Atividade salva, mas não foi possível marcar a solicitação como lançada.', 'err'); } }
       toast(novo ? `${K.Sing} Nº ${pad(salvo.numero)} cadastrad${K.o}${extra}` : `Alterações salvas${extra}`);
       location.hash = `#/${K.rota}/${salvo.id}`;
     } catch (x) {
@@ -2455,11 +2570,22 @@ const contratoTxt = (ct) => [ct.tipo, ct.pagamento && 'Pagamento: ' + ct.pagamen
 function textoAtividade(a) {
   const d = a.dados || {}, ct = d.contrato || {};
   return `*Atividade Nº ${pad(a.numero)} — ${a.nome}*\n${clienteTexto(clienteDe(a)) ? 'Cliente: ' + clienteTexto(clienteDe(a)) + '\n' : ''}${SIT[a.situacao]?.label} · ${a.tipo}\n${datasAtv(a)}\nSolicitante: ${a.gerente || '—'}\n` +
-    ((ct.valor || ct.tipo || ct.data || ct.pagamento) ? `Contrato: ${contratoTxt(ct)} — ${brl(ct.valor)}\n` : '') +
+    (ehEnvioMat(d) ? `Envio de material: ${materialTexto(d.material)}\n${itensMat(d).map((i) => `• ${i.qtd || ''} × [${i.cod}] ${i.descricao}${i.obs ? ' — ' + i.obs : ''}${Number(i.unit) > 0 ? ' · ' + brl(i.unit) + ' = ' + brl(i.valor) : ''}`).join('\n')}\n`
+      : (ct.valor || ct.tipo || ct.data || ct.pagamento) ? `Contrato: ${contratoTxt(ct)} — ${brl(ct.valor)}\n` : '') +
     envios(d).filter(temEntrega).map((en, i, l) => `${l.length > 1 ? `Remessa ${i + 1}` : 'Entrega'}: ${entregaTexto(en)}\n`).join('') +
     (d.servicos || []).map((x) => `• ${[x.tipo, x.formato].filter(Boolean).join(' — ')}${x.responsavel ? ' · Resp.: ' + x.responsavel : ''}${x.email ? ' · Envio: ' + x.email : ''}`).join('\n') +
     (compraTexto(a.valor_total, d.compras) ? `\nRepresenta ${compraTexto(a.valor_total, d.compras)}` : '') + `\n*Valor: ${brl(a.valor_total)}*`;
 }
+
+const itensTabela = (itens) => `<table class="mini"><thead><tr><th class="r">Qtd.</th><th>Cód.</th><th>Descrição</th><th>Obs.</th><th class="r">Unitário</th><th class="r">Total</th></tr></thead>
+  <tbody>${itens.map((i) => `<tr><td class="r">${esc(i.qtd || '')}</td><td>${esc(i.cod)}</td><td>${esc(i.descricao)}</td><td>${esc(i.obs || '')}</td><td class="r">${Number(i.unit) > 0 ? brl(i.unit) : '—'}</td><td class="r">${brl(i.valor)}</td></tr>`).join('')}</tbody>
+  <tfoot><tr><td colspan="5">Total dos itens</td><td class="r">${brl(soma(itens, (i) => i.valor))}</td></tr></tfoot></table>`;
+const materialTexto = (m = {}) => [m.tipo, m.evento && 'Evento: ' + m.evento + (m.data_evento ? ' em ' + fdate(m.data_evento) : ''), m.retorna && 'Material retorna: ' + m.retorna,
+  m.solicitacao && 'Solicitação Nº ' + pad(m.solicitacao)].filter(Boolean).join(' · ');
+const cartaoMaterial = (d) => { const m = d.material || {}, it = itensMat(d);
+  return `<div class="card full"><div class="card-h"><h3>${ic('box')} Envio de material</h3><span class="sp"></span><b class="num">${brl(soma(it, (i) => i.valor))}</b></div>
+    ${materialTexto(m) ? `<div class="small muted" style="margin:-6px 0 12px">${esc(materialTexto(m))}</div>` : ''}
+    ${it.length ? `<div style="overflow-x:auto">${itensTabela(it)}</div>` : '<p class="muted small" style="margin:0">Nenhum item informado.</p>'}</div>`; };
 
 function entregaFicha(en) {
   if (!temEntrega(en)) return '';
@@ -2484,7 +2610,8 @@ function fichaAtividade(a) {
       <div class="f-tot"><span class="pill ${SIT[a.situacao]?.cor || 'gray'}">${SIT[a.situacao]?.label || ''}</span><small>Valor</small><b>${brl(a.valor_total)}</b></div>
     </header>
     <div class="f-cols">
-      ${bloco('Contrato', contrato, ct.valor ? brl(ct.valor) : '')}
+      ${ehEnvioMat(d) ? bloco('Envio de material', (materialTexto(d.material) ? `<p>${esc(materialTexto(d.material))}</p>` : '') + (itensMat(d).length ? itensTabela(itensMat(d)) : ''), brl(soma(itensMat(d), (i) => i.valor)))
+        : bloco('Contrato', contrato, ct.valor ? brl(ct.valor) : '')}
       ${bloco('Compras do cliente', compras)}
       ${bloco('Serviços a realizar', serv)}
       ${envios(d).map((en, i, l) => bloco(l.length > 1 ? `Remessa ${i + 1} · Entrega` : 'Endereço de entrega', entregaFicha(en), entregaValor(en) ? brl(entregaValor(en)) : '')).join('')}
@@ -2531,8 +2658,8 @@ async function viewDetalheAtv(id) {
       </div>
     </div>
     <div class="det-grid">
-      <div class="card"><div class="card-h"><h3>Contrato</h3><span class="sp"></span><b class="num">${brl(ct.valor)}</b></div>
-        <div class="grid g4"><div><div class="lbl">Aprovação</div>${fdate(ct.data) || '—'}</div><div><div class="lbl">Tipo</div>${esc(ct.tipo || '—')}</div><div><div class="lbl">Pagamento</div>${esc(ct.pagamento || '—')}</div><div><div class="lbl">Valor</div>${brl(ct.valor)}</div></div></div>
+      ${ehEnvioMat(d) ? cartaoMaterial(d) : `<div class="card"><div class="card-h"><h3>Contrato</h3><span class="sp"></span><b class="num">${brl(ct.valor)}</b></div>
+        <div class="grid g4"><div><div class="lbl">Aprovação</div>${fdate(ct.data) || '—'}</div><div><div class="lbl">Tipo</div>${esc(ct.tipo || '—')}</div><div><div class="lbl">Pagamento</div>${esc(ct.pagamento || '—')}</div><div><div class="lbl">Valor</div>${brl(ct.valor)}</div></div></div>`}
       <div class="card"><div class="card-h"><h3>Compras do cliente</h3></div>
         ${comprasLista(d.compras) ? `<table class="mini"><tbody>${(d.compras || []).map((c) => `<tr><td>${c.ano}</td><td class="r">${Number(c.valor) > 0 ? brl(c.valor) : '—'}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small" style="margin:0">Não informado.</p>'}</div>
       <div class="card full"><div class="card-h"><h3>Serviços a realizar</h3></div>
@@ -2595,7 +2722,6 @@ const novaChave = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (
 // Solicitação → atividade já preenchida (a pessoa confere e salva)
 function atividadeDaSolic(x) {
   const d = x.dados || {};
-  const itens = (d.itens || []).map((i) => `• ${i.qtd} × [${i.cod}] ${i.descricao}${i.obs ? ' — ' + i.obs : ''}`).join('\n');
   return {
     nome: `${d.tipo || 'Solicitação'} — ${d.evento || ''}${d.cliente_nome ? ' (' + d.cliente_nome + ')' : ''}`.slice(0, 160),
     tipo: 'Kits, amostras e brindes', gerente: d.solicitante || '', data_inicio: d.data_solicitacao || '', data_fim: d.prazo_entrega || '',
@@ -2603,9 +2729,11 @@ function atividadeDaSolic(x) {
       cliente: { codigo: d.cliente_codigo || '', nome: d.cliente_nome || '' },
       entrega: { cep: d.cep || '', rua: d.rua || '', numero: d.numero || '', complemento: d.complemento || '', bairro: d.bairro || '', cidade: d.cidade || '', uf: d.uf || '',
         data: d.prazo_entrega || '', modo: d.forma_entrega || '', email: /@/.test(d.contato || '') ? d.contato : '', telefone: /@/.test(d.contato || '') ? '' : (d.contato || '') },
+      envio_material: true,
+      material: { solicitacao: String(x.numero), solicitacao_id: x.id, tipo: d.tipo || '', evento: d.evento || '', data_evento: d.data_evento || '', retorna: d.material_retorna || '',
+        itens: (d.itens || []).map((i) => ({ qtd: i.qtd, cod: i.cod || '', descricao: i.descricao || '', obs: i.obs || '', unit: '', valor: 0 })) },
       servicos: [],
-      observacoes: `Solicitação Nº ${pad(x.numero)} de ${fdate(d.data_solicitacao)} (formulário dos representantes)\n`
-        + `Tipo: ${d.tipo} · Evento: ${d.evento}${d.data_evento ? ' em ' + fdate(d.data_evento) : ''}\nMaterial retorna: ${d.material_retorna}\nContato: ${d.contato}\n\nItens:\n${itens}`,
+      observacoes: `Solicitação Nº ${pad(x.numero)} de ${fdate(d.data_solicitacao)} (formulário dos representantes) · contato: ${d.contato || '—'}`,
     },
   };
 }
@@ -3207,11 +3335,13 @@ function baixarCsv(cab, linhas, nome) {
 function exportarCsvAtv(lista) {
   const n = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
   baixarCsv(['Nº', 'Situação', 'Realizada', 'Tipo', 'Atividade', 'Cód. cliente', 'Cliente', 'Solicitante', 'Início', 'Prazo de entrega', 'Serviços', 'Responsável pela execução',
-    'Data de conclusão', 'Obs. da execução', 'Tipo do contrato', 'Forma de pagamento', 'Contrato', 'Frete', 'Mercadoria enviada', 'Valor', 'Endereço de entrega', 'Envio', 'Cadastrado por'],
+    'Data de conclusão', 'Obs. da execução', 'Tipo do contrato', 'Forma de pagamento', 'Contrato', 'Envio de material', 'Itens do envio', 'Valor dos itens', 'Frete', 'Mercadoria enviada', 'Valor', 'Endereço de entrega', 'Envio', 'Cadastrado por'],
   lista.map((a) => { const ct = a.dados?.contrato || {}, ex = execDe(a) || {};
     return [pad(a.numero), SIT[a.situacao]?.label, a.realizado ? 'Sim' : 'Não', a.tipo, a.nome, clienteDe(a).codigo || '', clienteDe(a).nome || '', a.gerente, fdate(a.data_inicio), fdate(a.data_fim),
       (a.dados?.servicos || []).map((x) => [x.tipo, x.formato].filter(Boolean).join(' — ')).join(' | '), responsaveisDe(a).join(', '),
-      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(ct.valor), n(soma(envios(a.dados), (x) => comFrete(x) ? x.frete : 0)), n(soma(envios(a.dados), mercDe)), n(a.valor_total),
+      fdate(ex.conclusao), ex.obs || '', ct.tipo || '', ct.pagamento || '', n(ehEnvioMat(a.dados) ? 0 : ct.valor), ehEnvioMat(a.dados) ? 'Sim' : 'Não',
+      itensMat(a.dados).map((i) => `${i.qtd || ''} x [${i.cod}] ${i.descricao}${Number(i.unit) > 0 ? ' (' + n(i.unit) + ')' : ''}`).join(' | '), n(soma(itensMat(a.dados), (i) => i.valor)),
+      n(soma(envios(a.dados), (x) => comFrete(x) ? x.frete : 0)), n(soma(envios(a.dados), mercDe)), n(a.valor_total),
       envios(a.dados).filter(temEntrega).map(enderecoTexto).join(' | '), envios(a.dados).map(envioTexto).filter(Boolean).join(' | '), nomeDe(a.criado_por)]; }), 'atividades-dello');
 }
 
